@@ -19,6 +19,7 @@ rules:
   - chunksgenerators
   - controllerconfigs
   - documentprocessors
+  - googledriveinformers
   - sqsconsumers
   - unstructureddataproducts
   verbs:
@@ -35,6 +36,7 @@ rules:
   - chunksgenerators/finalizers
   - controllerconfigs/finalizers
   - documentprocessors/finalizers
+  - googledriveinformers/finalizers
   - sqsconsumers/finalizers
   - unstructureddataproducts/finalizers
   verbs:
@@ -45,6 +47,7 @@ rules:
   - chunksgenerators/status
   - controllerconfigs/status
   - documentprocessors/status
+  - googledriveinformers/status
   - sqsconsumers/status
   - unstructureddataproducts/status
   verbs:

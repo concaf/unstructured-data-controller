@@ -32,6 +32,7 @@ type Folder struct {
 type GoogleDriveInformerSpec struct {
 	DataProduct string   `json:"dataProduct"`
 	Folders     []Folder `json:"folders"`
+	Secret      string   `json:"secret"`
 }
 
 // GoogleDriveInformerStatus defines the observed state of GoogleDriveInformer.
