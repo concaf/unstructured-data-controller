@@ -74,6 +74,11 @@ linters:
             - 6
         - name: confusing-results
           disabled: true
+        - name: unsecure-url-scheme
+          disabled: false
+          severity: error
+          exclude:
+            - "http://docling-serve:5001"
   exclusions:
     generated: lax
     rules:
