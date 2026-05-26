@@ -97,6 +97,9 @@ jobs:
         with:
           cluster_name: ${{ env.KIND_CLUSTER }}
 
+      - name: Install sponge
+        run: sudo apt-get update && sudo apt-get install -y moreutils
+
       - name: Run e2e tests
         env:
           SKIP_CLUSTER_SETUP: "true"
