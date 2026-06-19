@@ -1,0 +1,3 @@
+# Collapse generated and vendored files in GitHub PR diffs
+vendor/** linguist-generated
+go.sum linguist-generated
