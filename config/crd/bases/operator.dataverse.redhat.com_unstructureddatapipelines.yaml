@@ -104,7 +104,7 @@ spec:
                 type: object
               destinationConfig:
                 description: DestinationConfig defines where to write processed data
-                  (e.g. Snowflake internal stage or S3).
+                  (e.g. S3).
                 properties:
                   s3DestinationConfig:
                     description: S3Config configures an S3 bucket and optional prefix.
@@ -115,17 +115,6 @@ spec:
                         type: string
                     required:
                     - bucket
-                    type: object
-                  snowflakeInternalStageConfig:
-                    description: SnowflakeInternalStageConfig configures a Snowflake
-                      database schema and internal stage.
-                    properties:
-                      database:
-                        type: string
-                      schema:
-                        type: string
-                      stage:
-                        type: string
                     type: object
                   type:
                     type: string

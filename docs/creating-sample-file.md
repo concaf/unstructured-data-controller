@@ -8,7 +8,7 @@ The controller automatically processes unstructured files from S3:
 1. **Reads files** from S3 bucket
 2. **Converts** them to Markdown using Docling
 3. **Chunks** the content for better processing
-4. **Stores** the results in Snowflake
+4. **Stores** the results in S3
 
 ---
 
@@ -20,31 +20,17 @@ The controller automatically processes unstructured files from S3:
 
 ## Quick Setup
 
-### 1. Setup Snowflake
+### 1. Create S3 Buckets
 
-Run in Snowflake SQL (using names from your config):
+Create the ingestion and output buckets using the AWS CLI (or awslocal for LocalStack):
 
-```sql
--- Use your warehouse and database
-USE WAREHOUSE default;
-USE DATABASE TESTING_DB;
-
--- Create schema and stage
-CREATE SCHEMA IF NOT EXISTS TESTINGSCHEMA;
-CREATE OR REPLACE STAGE TESTING_DB.TESTINGSCHEMA.TESTINGSCHEMA_INTERNAL_STG
-    FILE_FORMAT = (TYPE = 'JSON');
-
--- Create role and grant permissions
-CREATE ROLE IF NOT EXISTS TESTING_ROLE;
-GRANT USAGE ON DATABASE TESTING_DB TO ROLE TESTING_ROLE;
-GRANT USAGE ON SCHEMA TESTING_DB.TESTINGSCHEMA TO ROLE TESTING_ROLE;
-GRANT READ, WRITE ON STAGE TESTING_DB.TESTINGSCHEMA.TESTINGSCHEMA_INTERNAL_STG TO ROLE TESTING_ROLE;
-
--- Grant role to your user (from controllerconfig.yaml)
-GRANT ROLE TESTING_ROLE TO USER SNOWFLAKE_USER;
+```bash
+awslocal s3 mb s3://data-ingestion-bucket
+awslocal s3 mb s3://output-chunks-bucket
+awslocal s3 mb s3://data-storage-bucket
 ```
 
-### 4. Create Unstructured Data Pipeline
+### 2. Create Unstructured Data Pipeline
 
 **Apply UnstructuredDataPipeline:**
 ```bash
@@ -65,22 +51,13 @@ aws s3 cp test.pdf s3://data-ingestion-bucket/testunstructureddataproduct/
 # 1. Download the file
 # 2. Convert it to Markdown
 # 3. Chunk the content
-# 4. Upload to Snowflake
+# 4. Upload to S3 destination
 ```
 
-### Check Results in Snowflake
+### Check Results in S3
 
-```sql
--- Switch to the correct role
-USE ROLE TESTING_ROLE;
-
--- List files in stage
-LIST @TESTING_DB.TESTINGSCHEMA.TESTINGSCHEMA_INTERNAL_STG;
-
--- View processed data
-SELECT $1 AS data
-FROM @TESTING_DB.TESTINGSCHEMA.TESTINGSCHEMA_INTERNAL_STG
-LIMIT 1;
+```bash
+awslocal s3 ls s3://output-chunks-bucket/testunstructureddataproduct/
 ```
 
 ### Monitor Progress
@@ -134,11 +111,10 @@ spec:
 
   # Where to store results
   destinationConfig:
-    type: snowflakeInternalStage
-    snowflakeInternalStageConfig:
-      database: TESTING_DB
-      schema: TESTINGSCHEMA
-      stage: TESTINGSCHEMA_INTERNAL_STG
+    type: s3
+    s3DestinationConfig:
+      bucket: output-chunks-bucket
+      prefix: testunstructureddataproduct
 ```
 
 ---
@@ -153,8 +129,8 @@ After processing, each file produces:
    - `file.pdf-converted.json` - Converted Markdown
    - `file.pdf-chunks.json` - Chunked content
 
-2. **Snowflake Stage** (`TESTING_DB.TESTINGSCHEMA.TESTINGSCHEMA_INTERNAL_STG`):
-   - `testunstructureddataproduct/file.pdf-chunks.json` - Complete processed file with:
+2. **S3 Destination** (`s3://output-chunks-bucket/testunstructureddataproduct/`):
+   - `file.pdf-chunks.json` - Complete processed file with:
      - `convertedDocument`: Original conversion with metadata
      - `chunksDocument`: Chunked text ready for processing
 

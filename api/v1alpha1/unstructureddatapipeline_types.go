@@ -27,7 +27,6 @@ type (
 
 const (
 	TypeS3                             UnstructuredDataType = "s3"
-	DestinationTypeInternalStage       UnstructuredDataType = "snowflakeInternalStage"
 	ChunkingStrategyRecursiveCharacter ChunkingStrategy     = "recursiveCharacterTextSplitter"
 	ChunkingStrategyMarkdown           ChunkingStrategy     = "markdownTextSplitter"
 	ChunkingStrategyToken              ChunkingStrategy     = "tokenTextSplitter"
@@ -115,18 +114,10 @@ type S3Config struct {
 	Prefix string `json:"prefix,omitempty"`
 }
 
-// DestinationConfig defines where to write processed data (e.g. Snowflake internal stage or S3).
+// DestinationConfig defines where to write processed data (e.g. S3).
 type DestinationConfig struct {
-	Type                         UnstructuredDataType         `json:"type,omitempty"`
-	SnowflakeInternalStageConfig SnowflakeInternalStageConfig `json:"snowflakeInternalStageConfig,omitempty"`
-	S3DestinationConfig          S3Config                     `json:"s3DestinationConfig,omitempty"`
-}
-
-// SnowflakeInternalStageConfig configures a Snowflake database schema and internal stage.
-type SnowflakeInternalStageConfig struct {
-	Stage    string `json:"stage,omitempty"`
-	Database string `json:"database,omitempty"`
-	Schema   string `json:"schema,omitempty"`
+	Type                UnstructuredDataType `json:"type,omitempty"`
+	S3DestinationConfig S3Config             `json:"s3DestinationConfig,omitempty"`
 }
 
 // UnstructuredDataPipelineStatus defines the observed state of UnstructuredDataPipeline

@@ -7,13 +7,6 @@ metadata:
   name: controllerconfig
 spec:
   unstructuredSecret: unstructured-secret
-  snowflakeConfig:
-    name: "testing"
-    account: "account-identifier"
-    user: "SNOWFLAKE_USER"
-    role: "TESTING_ROLE"
-    region: "us-west-2"
-    warehouse: "default"
   unstructuredDataProcessingConfig:
     doclingServeURL: "http://localhost:5001"
     ingestionBucket: "data-ingestion-bucket"

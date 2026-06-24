@@ -2,7 +2,7 @@
 
 Simple guide to get the Unstructured Data Controller up and running. This guide walks you through setting up a ControllerConfig using [LocalStack](https://localstack.cloud/) for local development and testing.
 
-The ControllerConfig supplies the controller with AWS credentials and the name of the S3 ingestion bucket. snowflake and docling.
+The ControllerConfig supplies the controller with AWS credentials, the name of the S3 ingestion bucket, and docling configuration.
 
 ## Prerequisites
 
@@ -12,7 +12,7 @@ The ControllerConfig supplies the controller with AWS credentials and the name o
 - [Docling-server](https://github.com/docling-project/docling-serve) using `pip install "docling-serve[ui]"`
 - [Ollama](https://ollama.com/) using instructions [here](https://ollama.com/download)
 - `kubectl` and access to a Kubernetes cluster where the unstructured-data-controller is deployed
-- snowflake account key pair and hosted/local docling url
+- Hosted/local docling url
 - **Unstructured secret and ControllerConfig:** The controller uses AWS credentials and the ingestion bucket. If you have not created localstack, follow [Setup LocalStack](setup-localstack.md) first, then continue with this guide.
 
 ### 1. Create Namespace
@@ -45,9 +45,9 @@ ollama cp nomic-embed-text:latest nomic-ai/nomic-embed-text-v1.5
 
 ### 4. Create the Unstructured secret
 
-The controller reads AWS credentials and endpoint, snowflake private key and docling key from a Kubernetes secret. A sample secret is provided in `test/resources/unstructured/unstructured-secret.yaml` with the following keys:
+The controller reads AWS credentials, endpoint, and docling key from a Kubernetes secret. A sample secret is provided in `test/resources/unstructured/unstructured-secret.yaml` with the following keys:
 
-Specify the docling user key if required, base64 snowflake private key and local stack details
+Specify the docling user key if required and local stack details
 
 ```bash
 kubectl apply -f test/resources/unstructured/unstructured-secret.yaml -n unstructured-controller-namespace
@@ -94,13 +94,6 @@ metadata:
   name: controllerconfig-sample
 spec:
   unstructuredSecret: unstructured-secret
-  snowflakeConfig:
-    name: "testing"
-    account: "account-identifier"
-    user: "SNOWFLAKE_USER"
-    role: "TESTING_ROLE"
-    region: "us-west-2"
-    warehouse: "default"
   unstructuredDataProcessingConfig:
     ingestionBucket: data-ingestion-bucket
     dataStorageBucket: data-storage-bucket
