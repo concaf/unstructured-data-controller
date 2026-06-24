@@ -80,7 +80,29 @@ spec:
                   type:
                     type: string
                 type: object
-              dataProduct:
+              dependsOn:
+                items:
+                  description: StageDependency identifies an upstream stage by name
+                    and type.
+                  properties:
+                    name:
+                      type: string
+                    type:
+                      description: StageType is the discriminator for the stage union
+                        config.
+                      enum:
+                      - SourceCrawler
+                      - DocumentProcessor
+                      - ChunksGenerator
+                      - VectorEmbeddingsGenerator
+                      - DestinationSyncer
+                      type: string
+                  required:
+                  - name
+                  - type
+                  type: object
+                type: array
+              stageName:
                 type: string
             type: object
           status:

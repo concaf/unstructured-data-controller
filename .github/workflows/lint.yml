@@ -28,18 +28,12 @@ jobs:
         with:
           go-version-file: "go.mod"
           go-version: "1.26.x"
-      - name: gofmt
+      - name: Install yamllint
         run: |
-          make fmt
-      - name: vet
+          pip install yamllint
+      - name: fmt and vet
         run: |
-          make vet
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.10.0
-          args: --timeout=10m
-      - name: yamllint
+          make fmt vet
+      - name: lint
         run: |
-          apt update && apt install -y yamllint
-          yamllint $(find . -path ./vendor -prune -o -type f -regex ".*y[a]ml" -print)
+          make lint

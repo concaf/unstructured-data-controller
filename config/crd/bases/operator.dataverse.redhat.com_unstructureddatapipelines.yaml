@@ -48,138 +48,196 @@ spec:
             description: UnstructuredDataPipelineSpec defines the desired state of
               UnstructuredDataPipeline
             properties:
-              chunksGeneratorConfig:
-                properties:
-                  markdownSplitterConfig:
-                    properties:
-                      chunkOverlap:
-                        type: integer
-                      chunkSize:
-                        type: integer
-                      codeBlocks:
-                        type: boolean
-                      headingHierarchy:
-                        type: boolean
-                      joinTableRows:
-                        type: boolean
-                      referenceLinks:
-                        type: boolean
-                    type: object
-                  recursiveCharacterSplitterConfig:
-                    properties:
-                      chunkOverlap:
-                        type: integer
-                      chunkSize:
-                        type: integer
-                      keepSeparator:
-                        type: boolean
-                      separators:
-                        items:
+              secretRef:
+                type: string
+              stages:
+                items:
+                  description: PipelineStage defines a single step in the pipeline
+                    DAG.
+                  properties:
+                    chunksGeneratorConfig:
+                      properties:
+                        markdownSplitterConfig:
+                          properties:
+                            chunkOverlap:
+                              type: integer
+                            chunkSize:
+                              type: integer
+                            codeBlocks:
+                              type: boolean
+                            headingHierarchy:
+                              type: boolean
+                            joinTableRows:
+                              type: boolean
+                            referenceLinks:
+                              type: boolean
+                          type: object
+                        recursiveCharacterSplitterConfig:
+                          properties:
+                            chunkOverlap:
+                              type: integer
+                            chunkSize:
+                              type: integer
+                            keepSeparator:
+                              type: boolean
+                            separators:
+                              items:
+                                type: string
+                              type: array
+                          type: object
+                        strategy:
                           type: string
-                        type: array
-                    type: object
-                  strategy:
-                    type: string
-                  tokenSplitterConfig:
-                    properties:
-                      allowedSpecial:
-                        items:
+                        tokenSplitterConfig:
+                          properties:
+                            allowedSpecial:
+                              items:
+                                type: string
+                              type: array
+                            chunkOverlap:
+                              type: integer
+                            chunkSize:
+                              type: integer
+                            disallowedSpecial:
+                              items:
+                                type: string
+                              type: array
+                            encodingName:
+                              type: string
+                            modelName:
+                              type: string
+                          type: object
+                      required:
+                      - strategy
+                      type: object
+                    dependsOn:
+                      items:
+                        type: string
+                      type: array
+                    destinationSyncerConfig:
+                      description: DestinationSyncerConfig configures where to write
+                        processed data.
+                      properties:
+                        s3DestinationConfig:
+                          description: S3Config configures an S3 bucket and optional
+                            prefix.
+                          properties:
+                            bucket:
+                              type: string
+                            prefix:
+                              type: string
+                            sqsQueueURL:
+                              type: string
+                          required:
+                          - bucket
+                          type: object
+                        type:
                           type: string
-                        type: array
-                      chunkOverlap:
-                        type: integer
-                      chunkSize:
-                        type: integer
-                      disallowedSpecial:
-                        items:
+                      type: object
+                    documentProcessorConfig:
+                      properties:
+                        doclingConfig:
+                          properties:
+                            abort_on_error:
+                              type: boolean
+                            do_ocr:
+                              type: boolean
+                            force_ocr:
+                              type: boolean
+                            from_formats:
+                              items:
+                                type: string
+                              type: array
+                            image_export_mode:
+                              type: string
+                            ocr_engine:
+                              type: string
+                            ocr_lang:
+                              items:
+                                type: string
+                              type: array
+                            pdf_backend:
+                              type: string
+                            table_mode:
+                              type: string
+                            to_formats:
+                              items:
+                                type: string
+                              type: array
+                          type: object
+                        type:
                           type: string
-                        type: array
-                      encodingName:
-                        type: string
-                      modelName:
-                        type: string
-                    type: object
-                required:
-                - strategy
-                type: object
-              destinationConfig:
-                description: DestinationConfig defines where to write processed data
-                  (e.g. S3).
-                properties:
-                  s3DestinationConfig:
-                    description: S3Config configures an S3 bucket and optional prefix.
-                    properties:
-                      bucket:
-                        type: string
-                      prefix:
-                        type: string
-                    required:
-                    - bucket
-                    type: object
-                  type:
-                    type: string
-                type: object
-              documentProcessorConfig:
-                properties:
-                  doclingConfig:
-                    properties:
-                      abort_on_error:
-                        type: boolean
-                      do_ocr:
-                        type: boolean
-                      force_ocr:
-                        type: boolean
-                      from_formats:
-                        items:
+                      type: object
+                    name:
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    sourceCrawlerConfig:
+                      description: SourceCrawlerConfig configures where to read unstructured
+                        data from.
+                      properties:
+                        s3Config:
+                          description: S3Config configures an S3 bucket and optional
+                            prefix.
+                          properties:
+                            bucket:
+                              type: string
+                            prefix:
+                              type: string
+                            sqsQueueURL:
+                              type: string
+                          required:
+                          - bucket
+                          type: object
+                        type:
                           type: string
-                        type: array
-                      image_export_mode:
-                        type: string
-                      ocr_engine:
-                        type: string
-                      ocr_lang:
-                        items:
+                      type: object
+                    type:
+                      description: StageType is the discriminator for the stage union
+                        config.
+                      enum:
+                      - SourceCrawler
+                      - DocumentProcessor
+                      - ChunksGenerator
+                      - VectorEmbeddingsGenerator
+                      - DestinationSyncer
+                      type: string
+                    vectorEmbeddingsGeneratorConfig:
+                      properties:
+                        modelName:
                           type: string
-                        type: array
-                      pdf_backend:
-                        type: string
-                      table_mode:
-                        type: string
-                      to_formats:
-                        items:
-                          type: string
-                        type: array
-                    type: object
-                  type:
-                    type: string
-                type: object
-              sourceConfig:
-                description: SourceConfig defines where to read unstructured data
-                  from (e.g. S3).
-                properties:
-                  s3Config:
-                    description: S3Config configures an S3 bucket and optional prefix.
-                    properties:
-                      bucket:
-                        type: string
-                      prefix:
-                        type: string
-                    required:
-                    - bucket
-                    type: object
-                  type:
-                    type: string
-                type: object
-              vectorEmbeddingsGeneratorConfig:
-                properties:
-                  modelName:
-                    type: string
-                  nomicEmbedTextV15Config:
-                    properties:
-                      encodingformat:
-                        type: string
-                    type: object
-                type: object
+                        nomicEmbedTextV15Config:
+                          properties:
+                            encodingformat:
+                              type: string
+                          type: object
+                      type: object
+                  required:
+                  - name
+                  - type
+                  type: object
+                  x-kubernetes-validations:
+                  - message: sourceCrawlerConfig is required when type is SourceCrawler
+                    rule: 'self.type == ''SourceCrawler'' ? has(self.sourceCrawlerConfig)
+                      : true'
+                  - message: documentProcessorConfig is required when type is DocumentProcessor
+                    rule: 'self.type == ''DocumentProcessor'' ? has(self.documentProcessorConfig)
+                      : true'
+                  - message: chunksGeneratorConfig is required when type is ChunksGenerator
+                    rule: 'self.type == ''ChunksGenerator'' ? has(self.chunksGeneratorConfig)
+                      : true'
+                  - message: vectorEmbeddingsGeneratorConfig is required when type
+                      is VectorEmbeddingsGenerator
+                    rule: 'self.type == ''VectorEmbeddingsGenerator'' ? has(self.vectorEmbeddingsGeneratorConfig)
+                      : true'
+                  - message: destinationSyncerConfig is required when type is DestinationSyncer
+                    rule: 'self.type == ''DestinationSyncer'' ? has(self.destinationSyncerConfig)
+                      : true'
+                minItems: 1
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+            required:
+            - stages
             type: object
           status:
             description: UnstructuredDataPipelineStatus defines the observed state
@@ -244,6 +302,20 @@ spec:
               lastAppliedGeneration:
                 format: int64
                 type: integer
+              stages:
+                items:
+                  description: StageCreationStatus tracks whether a child CR has been
+                    created for a stage.
+                  properties:
+                    created:
+                      type: boolean
+                    name:
+                      type: string
+                  required:
+                  - created
+                  - name
+                  type: object
+                type: array
             type: object
         type: object
     served: true

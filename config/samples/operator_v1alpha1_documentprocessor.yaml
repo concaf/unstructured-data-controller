@@ -6,20 +6,16 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: documentprocessor-sample
 spec:
-  dataProduct: testunstructureddataproduct
+  stageName: convert
+  dependsOn:
+    - name: crawl
+      type: SourceCrawler
   config:
     type: docling
     doclingConfig:
-      from_formats:
-        - pdf
-        - docx
-        - pptx
-        - xlsx
-      image_export_mode: embedded
+      from_formats: [pdf, docx, pptx, xlsx]
       do_ocr: true
-      force_ocr: false
       ocr_engine: easyocr
-      ocr_lang:
-        - en
+      ocr_lang: [en]
       pdf_backend: dlparse_v4
       table_mode: fast

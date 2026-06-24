@@ -44,7 +44,7 @@ resources:
   controller: true
   domain: dataverse.redhat.com
   group: operator
-  kind: SQSInformer
+  kind: VectorEmbeddingsGenerator
   path: github.com/redhat-data-and-ai/unstructured-data-controller/api/v1alpha1
   version: v1alpha1
 - api:
@@ -53,7 +53,16 @@ resources:
   controller: true
   domain: dataverse.redhat.com
   group: operator
-  kind: VectorEmbeddingsGenerator
+  kind: SourceCrawler
+  path: github.com/redhat-data-and-ai/unstructured-data-controller/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: dataverse.redhat.com
+  group: operator
+  kind: DestinationSyncer
   path: github.com/redhat-data-and-ai/unstructured-data-controller/api/v1alpha1
   version: v1alpha1
 version: "3"

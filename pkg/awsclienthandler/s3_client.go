@@ -73,6 +73,11 @@ func NewFileStoreS3ClientFromConfig(ctx context.Context, awsConfig *AWSConfig) e
 	return nil
 }
 
+// NewS3Client creates an S3 client from AWS credentials.
+func NewS3Client(ctx context.Context, awsConfig *AWSConfig) (*s3.Client, error) {
+	return createS3ClientFromAWSConfig(ctx, awsConfig)
+}
+
 func createS3ClientFromAWSConfig(ctx context.Context, awsConfig *AWSConfig) (*s3.Client, error) {
 	cfg, err := getAWSConfig(ctx, awsConfig)
 	if err != nil {
@@ -273,12 +278,7 @@ func ObjectExists(ctx context.Context, s3Client *s3.Client, bucketName, objectKe
 	return true, nil
 }
 
-func GetObject(ctx context.Context, bucketName, objectKey string) (*s3.GetObjectOutput, error) {
-	s3Client, err := GetSourceS3Client()
-	if err != nil {
-		return nil, err
-	}
-
+func GetObject(ctx context.Context, s3Client *s3.Client, bucketName, objectKey string) (*s3.GetObjectOutput, error) {
 	return s3Client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucketName),
 		Key:    aws.String(objectKey),

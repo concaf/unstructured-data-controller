@@ -25,11 +25,14 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/util/retry"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	operatorv1alpha1 "github.com/redhat-data-and-ai/unstructured-data-controller/api/v1alpha1"
 	"github.com/redhat-data-and-ai/unstructured-data-controller/internal/controller/controllerutils"
@@ -44,8 +47,10 @@ const (
 
 type VectorEmbeddingsGeneratorReconciler struct {
 	client.Client
-	Scheme    *runtime.Scheme
-	fileStore *filestore.FileStore
+	Scheme     *runtime.Scheme
+	fileStore  *filestore.FileStore
+	inputPath  string
+	outputPath string
 }
 
 // +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=vectorembeddingsgenerators,verbs=get;list;watch;create;update;patch;delete
@@ -97,65 +102,32 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 	}
 	r.fileStore = fs
 
-	dataProductName := vectorEmbeddingsGeneratorCR.Spec.DataProduct
-	filePaths, err := r.fileStore.ListFilesInPath(ctx, dataProductName)
-	logger.Info("files in path", "files", filePaths)
+	pipelineName, err := controllerutils.ParentPipelineNameFromOwnerReference(vectorEmbeddingsGeneratorCR)
+	if err != nil {
+		return r.handleError(ctx, vectorEmbeddingsGeneratorCR, err)
+	}
+	r.inputPath = unstructured.StagePath(pipelineName, vectorEmbeddingsGeneratorCR.Spec.DependsOn[0].Name)
+	r.outputPath = unstructured.StagePath(pipelineName, vectorEmbeddingsGeneratorCR.Spec.StageName)
+	filePaths, err := r.fileStore.ListFilesInPath(ctx, r.inputPath)
+	logger.Info("files in path", "count", len(filePaths))
 	if err != nil {
 		logger.Error(err, "failed to list files in path")
 		return r.handleError(ctx, vectorEmbeddingsGeneratorCR, err)
 	}
 
-	// now that we have the list of files to process, we may remove the force reconcile label as we are ready to accept more events
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		latest := &operatorv1alpha1.VectorEmbeddingsGenerator{}
-		if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
-			return err
-		}
-		return controllerutils.RemoveForceReconcileLabel(ctx, r.Client, latest)
-	}); err != nil {
-		logger.Error(err, "failed to remove force reconcile label from VectorEmbeddingsGenerator CR")
-		return r.handleError(ctx, vectorEmbeddingsGeneratorCR, err)
-	}
-
-	chunksFilePaths := unstructured.FilterChunksFilePaths(filePaths)
-	logger.Info("chunks filepaths filtered successfully", "chunksFilePaths", chunksFilePaths)
-
 	embeddingErrors := []error{}
-	var embedded bool
-	for _, chunksFilePath := range chunksFilePaths {
+	for _, chunksFilePath := range filePaths {
 		logger.Info("processing chunked file for embedding", "file", chunksFilePath)
-		fileEmbedded, err := r.processChunkedFile(ctx, chunksFilePath, vectorEmbeddingsGeneratorCR)
-		if err != nil {
+		if _, err := r.processChunkedFile(ctx, chunksFilePath, vectorEmbeddingsGeneratorCR); err != nil {
 			embeddingErrors = append(embeddingErrors, err)
 			logger.Error(err, "failed to process chunked file", "file", chunksFilePath)
 			continue
-		}
-		if fileEmbedded {
-			embedded = true
 		}
 	}
 
 	if len(embeddingErrors) > 0 {
 		logger.Error(embeddingErrors[0], "failed to process some chunked files")
 		return r.handleError(ctx, vectorEmbeddingsGeneratorCR, errors.New("failed to process some chunked files"))
-	}
-
-	// Add force reconcile to unstructured data pipeline if any of the file got embedded during this reconciliation
-	if embedded {
-		unstructuredDataPipelineKey := client.ObjectKey{Namespace: vectorEmbeddingsGeneratorCR.Namespace, Name: vectorEmbeddingsGeneratorCR.Spec.DataProduct}
-		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			unstructuredDataPipeline := &operatorv1alpha1.UnstructuredDataPipeline{}
-			if err := r.Get(ctx, unstructuredDataPipelineKey, unstructuredDataPipeline); err != nil {
-				return err
-			}
-			return controllerutils.AddForceReconcileLabel(ctx, r.Client, unstructuredDataPipeline)
-		}); err != nil {
-			logger.Error(err, "failed to add force reconcile label to UnstructuredDataPipeline CR")
-			return r.handleError(ctx, vectorEmbeddingsGeneratorCR, err)
-		}
-		logger.Info("successfully added force reconcile label to UnstructuredDataPipeline CR")
-	} else {
-		logger.Info("no files were embedded, no need to add force reconcile label to UnstructuredDataPipeline CR")
 	}
 
 	// all done, let's update the status to ready
@@ -219,19 +191,13 @@ func (r *VectorEmbeddingsGeneratorReconciler) processChunkedFile(ctx context.Con
 
 	var embeddingClient embedding.EmbeddingGenerator
 
-	switch vectorEmbeddingsGeneratorCR.Spec.VectorEmbeddingsGeneratorConfig.ModelName {
-	case "nomic-ai/nomic-embed-text-v1.5":
-		endpoint := string(unstructuredSecret.Data[modelMap[Model(vectorEmbeddingsGeneratorCR.Spec.VectorEmbeddingsGeneratorConfig.ModelName)].Endpoint])
-		apiKey := string(unstructuredSecret.Data[modelMap[Model(vectorEmbeddingsGeneratorCR.Spec.VectorEmbeddingsGeneratorConfig.ModelName)].APIKey])
-		embeddingClient = embedding.NewHTTPClient(&embedding.HTTPClientConfig{
-			Endpoint:   endpoint,
-			APIKey:     apiKey,
-			AuthFormat: "Bearer",
-			ModelName:  vectorEmbeddingsGeneratorCR.Spec.VectorEmbeddingsGeneratorConfig.ModelName,
-		})
-	default:
-		return false, fmt.Errorf("unsupported embedding model: %s", vectorEmbeddingsGeneratorCR.Spec.VectorEmbeddingsGeneratorConfig.ModelName)
-	}
+	vegConfig := vectorEmbeddingsGeneratorCR.Spec.VectorEmbeddingsGeneratorConfig
+	embeddingClient = embedding.NewHTTPClient(&embedding.HTTPClientConfig{
+		Endpoint:   embeddingEndpoint,
+		APIKey:     embeddingAPIKey,
+		AuthFormat: "Bearer",
+		ModelName:  vegConfig.ModelName,
+	})
 
 	logger.Info("generating embeddings for chunks", "file", chunksFilePath, "chunkCount", len(texts))
 
@@ -289,7 +255,7 @@ func (r *VectorEmbeddingsGeneratorReconciler) processChunkedFile(ctx context.Con
 		return false, err
 	}
 
-	embeddingsFilePath := unstructured.GetVectorEmbeddingsFilePath(chunkedFile.ConvertedDocument.Metadata.RawFilePath)
+	embeddingsFilePath := unstructured.RemapToOutputDir(chunksFilePath, r.inputPath, r.outputPath)
 	logger.Info("storing embedded file", "embeddingsFilePath", embeddingsFilePath)
 	if err := r.fileStore.Store(ctx, embeddingsFilePath, embeddingsFileBytes); err != nil {
 		logger.Error(err, "failed to store embedded file")
@@ -324,7 +290,7 @@ func (r *VectorEmbeddingsGeneratorReconciler) needsEmbedding(ctx context.Context
 		return false, err
 	}
 
-	embeddingsFilePath := unstructured.GetVectorEmbeddingsFilePath(chunkedFile.ConvertedDocument.Metadata.RawFilePath)
+	embeddingsFilePath := unstructured.RemapToOutputDir(chunksFilePath, r.inputPath, r.outputPath)
 	logger.Info("embeddings file path", "embeddingsFilePath", embeddingsFilePath)
 	embeddingsFileExists, err := r.fileStore.Exists(ctx, embeddingsFilePath)
 	if err != nil {
@@ -381,11 +347,37 @@ func (r *VectorEmbeddingsGeneratorReconciler) handleError(ctx context.Context, v
 	return ctrl.Result{}, reconcileErr
 }
 
+func (r *VectorEmbeddingsGeneratorReconciler) findDependents(ctx context.Context, obj client.Object) []reconcile.Request {
+	list := &operatorv1alpha1.VectorEmbeddingsGeneratorList{}
+	if err := r.List(ctx, list, client.InNamespace(obj.GetNamespace())); err != nil {
+		return nil
+	}
+	changedName := obj.GetName()
+	var requests []reconcile.Request
+	for _, item := range list.Items {
+		pipelineName, err := controllerutils.ParentPipelineNameFromOwnerReference(&item)
+		if err != nil {
+			continue
+		}
+		for _, dep := range item.Spec.DependsOn {
+			if pipelineName+"-"+dep.Name == changedName {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: item.Name, Namespace: item.Namespace},
+				})
+				break
+			}
+		}
+	}
+	return requests
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *VectorEmbeddingsGeneratorReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	labelPredicate := controllerutils.ForceReconcilePredicate()
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&operatorv1alpha1.VectorEmbeddingsGenerator{}).
-		WithEventFilter(predicate.Or(predicate.GenerationChangedPredicate{}, labelPredicate)).
+		For(&operatorv1alpha1.VectorEmbeddingsGenerator{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&operatorv1alpha1.SourceCrawler{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
+		Watches(&operatorv1alpha1.DocumentProcessor{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
+		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
+		Watches(&operatorv1alpha1.DestinationSyncer{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
 		Complete(r)
 }

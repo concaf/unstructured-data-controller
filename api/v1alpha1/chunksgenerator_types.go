@@ -20,13 +20,32 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// sample spec:
+//
+//	spec:
+//	  stageName: chunk
+//	  dependsOn:
+//	    - name: convert
+//	      type: DocumentProcessor
+//	  config:
+//	    strategy: recursiveCharacterTextSplitter
+//	    recursiveCharacterSplitterConfig:
+//	      chunkSize: 1000
+//	      chunkOverlap: 200
+//	status:
+//	  conditions:
+//	    - type: ChunksGeneratorReady
+//	      status: "True"
+//	      message: successfully reconciled
+
 const (
 	ChunksGeneratorCondition = "ChunksGeneratorReady"
 )
 
 // ChunksGeneratorSpec defines the desired state of ChunksGenerator
 type ChunksGeneratorSpec struct {
-	DataProduct           string                `json:"dataProduct,omitempty"`
+	StageName             string                `json:"stageName,omitempty"`
+	DependsOn             []StageDependency     `json:"dependsOn,omitempty"`
 	ChunksGeneratorConfig ChunksGeneratorConfig `json:"config,omitempty"`
 }
 

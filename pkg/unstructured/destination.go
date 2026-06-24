@@ -12,40 +12,26 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/awsclienthandler"
 	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/filestore"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 type Destination interface {
-	// SyncFilesToDestination will sync the data to the destination
 	SyncFilesToDestination(ctx context.Context, fs *filestore.FileStore, filePaths []string) error
 }
 
-// S3Destination syncs chunk files to an S3 bucket (e.g. LocalStack or AWS).
+// S3Destination syncs files to an S3 bucket at prefix/stages/<stageName>/.
 type S3Destination struct {
-	S3Client        *s3.Client
-	Bucket          string
-	Prefix          string
-	DataProductName string // used as default prefix when Prefix is empty (CR name)
+	S3Client  *s3.Client
+	Bucket    string
+	Prefix    string
+	StageName string
 }
 
-func (d *S3Destination) getPrefix() string {
-	if d.Prefix != "" {
-		return d.Prefix
-	}
-	return d.DataProductName
-}
-
-// s3KeyForChunksFile returns the S3 object key for a chunks file path
-// When Prefix is not set, uses DataProductName/file_name as default.
-func (d *S3Destination) s3KeyForChunksFile(chunksFilePath string) string {
-	baseName := filepath.Base(chunksFilePath)
-	prefix := d.getPrefix()
-	key := baseName
-	if prefix != "" {
-		key = filepath.Join(prefix, baseName)
-	}
+// s3Key returns the destination key: <prefix>/stages/<stageName>/<filename>
+func (d *S3Destination) s3Key(filePath string) string {
+	baseName := filepath.Base(filePath)
+	key := filepath.Join(d.Prefix, "stages", d.StageName, baseName)
 	if filepath.Separator != '/' {
 		key = filepath.ToSlash(key)
 	}
@@ -55,28 +41,24 @@ func (d *S3Destination) s3KeyForChunksFile(chunksFilePath string) string {
 func (d *S3Destination) SyncFilesToDestination(ctx context.Context, fs *filestore.FileStore,
 	chunksFilePaths []string) error {
 	logger := log.FromContext(ctx)
+	destPrefix := filepath.Join(d.Prefix, "stages", d.StageName) + "/"
+	if filepath.Separator != '/' {
+		destPrefix = filepath.ToSlash(destPrefix)
+	}
 	logger.Info("syncing data to S3 destination",
-		"bucket", d.Bucket, "prefix", d.getPrefix(), "filePaths", chunksFilePaths)
+		"bucket", d.Bucket, "prefix", destPrefix, "filePaths", chunksFilePaths)
 
 	s3Client := d.S3Client
-	if s3Client == nil {
-		var err error
-		s3Client, err = awsclienthandler.GetDestinationS3Client()
-		if err != nil {
-			return fmt.Errorf("failed to get S3 client: %w", err)
-		}
-	}
 
-	// Keys currently in the destination: one map, trim as we sync, delete the rest.
 	keysInDestination := make(map[string]bool)
 	paginator := s3.NewListObjectsV2Paginator(s3Client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(d.Bucket),
-		Prefix: aws.String(d.getPrefix()),
+		Prefix: aws.String(destPrefix),
 	})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			return fmt.Errorf("list objects s3://%s prefix %q: %w", d.Bucket, d.getPrefix(), err)
+			return fmt.Errorf("list objects s3://%s prefix %q: %w", d.Bucket, destPrefix, err)
 		}
 		for _, obj := range page.Contents {
 			if obj.Key != nil {
@@ -92,7 +74,7 @@ func (d *S3Destination) SyncFilesToDestination(ctx context.Context, fs *filestor
 			return fmt.Errorf("retrieve %s: %w", chunksFilePath, err)
 		}
 
-		key := d.s3KeyForChunksFile(chunksFilePath)
+		key := d.s3Key(chunksFilePath)
 		delete(keysInDestination, key)
 
 		// Calculate SHA256 of local file

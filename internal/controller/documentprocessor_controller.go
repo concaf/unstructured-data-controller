@@ -25,11 +25,14 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/util/retry"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	operatorv1alpha1 "github.com/redhat-data-and-ai/unstructured-data-controller/api/v1alpha1"
 	"github.com/redhat-data-and-ai/unstructured-data-controller/internal/controller/controllerutils"
@@ -54,6 +57,8 @@ type DocumentProcessorReconciler struct {
 
 	doclingConfig *docling.DoclingConfig
 	fileStore     *filestore.FileStore
+	inputPath     string
+	outputPath    string
 }
 
 // +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=documentprocessors,verbs=get;list;watch;create;update;patch;delete
@@ -64,8 +69,6 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	logger := log.FromContext(ctx)
 	logger.Info("reconciling", "controller", DocumentProcessorControllerName)
 
-	// NOTE: Config CR health check is commented out as requested
-	// This was the original dependency on config.spec
 	isHealthy, err := IsConfigCRHealthy(ctx, r.Client, req.Namespace)
 	if err != nil {
 		logger.Error(err, "failed to check if Config CR is healthy")
@@ -81,13 +84,6 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	documentProcessorCR := &operatorv1alpha1.DocumentProcessor{}
 	if err := r.Get(ctx, req.NamespacedName, documentProcessorCR); err != nil {
 		logger.Error(err, "failed to get DocumentProcessor CR")
-		return ctrl.Result{}, err
-	}
-
-	documentProcessorKey := client.ObjectKeyFromObject(documentProcessorCR)
-	if err := controllerutils.RemoveForceReconcileLabelWithRetry(ctx, r.Client, documentProcessorKey,
-		func() client.Object { return &operatorv1alpha1.DocumentProcessor{} }); err != nil {
-		logger.Error(err, "error removing the force-reconcile label from the DocumentProcessor CR")
 		return ctrl.Result{}, err
 	}
 
@@ -131,9 +127,14 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 	}
 
-	// now let's process if there are any new raw files that need to be converted
-	dataProductName := documentProcessorCR.Spec.DataProduct
-	filePaths, err := r.fileStore.ListFilesInPath(ctx, dataProductName)
+	// read from upstream stage directory, write to own stage directory
+	pipelineName, err := controllerutils.ParentPipelineNameFromOwnerReference(documentProcessorCR)
+	if err != nil {
+		return r.handleError(ctx, documentProcessorCR, err)
+	}
+	r.inputPath = unstructured.StagePath(pipelineName, documentProcessorCR.Spec.DependsOn[0].Name)
+	r.outputPath = unstructured.StagePath(pipelineName, documentProcessorCR.Spec.StageName)
+	filePaths, err := r.fileStore.ListFilesInPath(ctx, r.inputPath)
 	if err != nil {
 		logger.Error(err, "failed to list files in path")
 		return r.handleError(ctx, documentProcessorCR, err)
@@ -147,19 +148,6 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			documentProcessingErrors = append(documentProcessingErrors, err)
 			logger.Error(err, "failed to process document", "document", rawFilePath)
 		}
-	}
-
-	// add force reconcile label to the ChunksGenerator CR
-	chunksGeneratorKey := client.ObjectKey{Namespace: documentProcessorCR.Namespace, Name: documentProcessorCR.Name}
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		chunksGeneratorCR := &operatorv1alpha1.ChunksGenerator{}
-		if err := r.Get(ctx, chunksGeneratorKey, chunksGeneratorCR); err != nil {
-			return err
-		}
-		return controllerutils.AddForceReconcileLabel(ctx, r.Client, chunksGeneratorCR)
-	}); err != nil {
-		logger.Error(err, "failed to add force reconcile label to ChunksGenerator CR")
-		return r.handleError(ctx, documentProcessorCR, err)
 	}
 
 	if len(documentProcessingErrors) > 0 || len(jobProcessingErrors) > 0 {
@@ -240,7 +228,7 @@ func (r *DocumentProcessorReconciler) reconcileJob(ctx context.Context, job oper
 		if err != nil {
 			return err
 		}
-		convertedFilePath := unstructured.GetConvertedFilePath(job.FilePath)
+		convertedFilePath := unstructured.RemapToOutputDir(job.FilePath+".json", r.inputPath, r.outputPath)
 		if err := r.fileStore.Store(ctx, convertedFilePath, convertedFileBytes); err != nil {
 			return err
 		}
@@ -365,7 +353,7 @@ func (r *DocumentProcessorReconciler) needsConversion(ctx context.Context, rawFi
 	}
 
 	// check whether metadata file exists
-	rawMetadataFileExists, err := r.fileStore.Exists(ctx, unstructured.GetMetadataFilePath(rawFilePath))
+	rawMetadataFileExists, err := r.fileStore.Exists(ctx, unstructured.MetadataPath(rawFilePath))
 	if err != nil {
 		return false, err
 	}
@@ -381,14 +369,15 @@ func (r *DocumentProcessorReconciler) needsConversion(ctx context.Context, rawFi
 		return false, err
 	}
 
-	// does the converted file exist?
-	convertedFileExists, err := r.fileStore.Exists(ctx, unstructured.GetConvertedFilePath(rawFilePath))
+	// does the converted file exist in the output directory?
+	convertedFilePath := unstructured.RemapToOutputDir(rawFilePath+".json", r.inputPath, r.outputPath)
+	convertedFileExists, err := r.fileStore.Exists(ctx, convertedFilePath)
 	if err != nil {
 		return false, err
 	}
 	if convertedFileExists {
 		// if the converted file exists, then we need to check if it has the same configuration
-		convertedFileRaw, err := r.fileStore.Retrieve(ctx, unstructured.GetConvertedFilePath(rawFilePath))
+		convertedFileRaw, err := r.fileStore.Retrieve(ctx, convertedFilePath)
 		if err != nil {
 			return false, err
 		}
@@ -470,7 +459,7 @@ func (r *DocumentProcessorReconciler) needsConversion(ctx context.Context, rawFi
 
 func (r *DocumentProcessorReconciler) getFileUID(ctx context.Context, rawFilePath string) (string, error) {
 	logger := log.FromContext(ctx)
-	metaDataFileRaw, err := r.fileStore.Retrieve(ctx, unstructured.GetMetadataFilePath(rawFilePath))
+	metaDataFileRaw, err := r.fileStore.Retrieve(ctx, unstructured.MetadataPath(rawFilePath))
 	if err != nil {
 		logger.Error(err, "Failed to retrieve metadata file")
 		return "", err
@@ -486,12 +475,40 @@ func (r *DocumentProcessorReconciler) getFileUID(ctx context.Context, rawFilePat
 	return metaDataFile.UID, nil
 }
 
+func (r *DocumentProcessorReconciler) findDependents(ctx context.Context, obj client.Object) []reconcile.Request {
+	list := &operatorv1alpha1.DocumentProcessorList{}
+	if err := r.List(ctx, list, client.InNamespace(obj.GetNamespace())); err != nil {
+		return nil
+	}
+	changedName := obj.GetName()
+	var requests []reconcile.Request
+	for _, item := range list.Items {
+		pipelineName, err := controllerutils.ParentPipelineNameFromOwnerReference(&item)
+		if err != nil {
+			continue
+		}
+		for _, dep := range item.Spec.DependsOn {
+			if pipelineName+"-"+dep.Name == changedName {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: item.Name, Namespace: item.Namespace},
+				})
+				break
+			}
+		}
+	}
+	return requests
+}
+
 // SetupWithManager sets up the controller with the Manager.
+// SetupWithManager registers this controller. Spec changes trigger via GenerationChangedPredicate.
+// Watches on other stage types trigger reconcile when an upstream dependency's status changes.
 func (r *DocumentProcessorReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	labelPredicate := controllerutils.ForceReconcilePredicate()
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&operatorv1alpha1.DocumentProcessor{}).
-		WithEventFilter(predicate.Or(predicate.GenerationChangedPredicate{}, labelPredicate)).
+		For(&operatorv1alpha1.DocumentProcessor{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&operatorv1alpha1.SourceCrawler{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
+		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
+		Watches(&operatorv1alpha1.VectorEmbeddingsGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
+		Watches(&operatorv1alpha1.DestinationSyncer{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
 		Named("documentprocessor").
 		Complete(r)
 }
@@ -500,11 +517,11 @@ func (r *DocumentProcessorReconciler) handleError(ctx context.Context, documentP
 	logger := log.FromContext(ctx)
 	logger.Error(err, "encountered error")
 	reconcileErr := err
-	if updateErr := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
+	if err := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
 		documentProcessorCR.UpdateStatus("", reconcileErr)
-	}); updateErr != nil {
-		logger.Error(updateErr, "failed to update DocumentProcessor CR status")
-		return ctrl.Result{}, updateErr
+	}); err != nil {
+		logger.Error(err, "failed to update DocumentProcessor CR status")
+		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, reconcileErr
 }

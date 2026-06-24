@@ -20,50 +20,69 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// sample spec:
+//
+//	spec:
+//	  stageName: crawl                       # this stage's name in the pipeline
+//	  sourceCrawlerConfig:
+//	    type: s3
+//	    s3Config:
+//	      bucket: data-ingestion-bucket
+//	      prefix: documents/
+//	      sqsQueueURL: https://sqs...        # optional, enables real-time S3 notifications
+//	status:
+//	  conditions:
+//	    - type: SourceCrawlerReady
+//	      status: "True"                     # True | False | Unknown
+//	      message: successfully reconciled
+
 const (
-	SQSInformerCondition = "SQSInformerReady"
+	SourceCrawlerCondition = "SourceCrawlerReady"
 )
 
-// SQSInformerSpec defines the desired state of SQSInformer.
-type SQSInformerSpec struct {
-	QueueURL string `json:"queueURL,omitempty"`
+// SourceCrawlerSpec defines the desired state of SourceCrawler.
+type SourceCrawlerSpec struct {
+	StageName           string              `json:"stageName,omitempty"`
+	SecretRef           string              `json:"secretRef,omitempty"`
+	DependsOn           []StageDependency   `json:"dependsOn,omitempty"`
+	SourceCrawlerConfig SourceCrawlerConfig `json:"sourceCrawlerConfig,omitempty"`
 }
 
-// SQSInformerStatus defines the observed state of SQSInformer.
-type SQSInformerStatus struct {
+// SourceCrawlerStatus defines the observed state of SourceCrawler.
+type SourceCrawlerStatus struct {
 	LastAppliedGeneration int64              `json:"lastAppliedGeneration,omitempty"`
 	Conditions            []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.conditions[?(@.type=="SQSInformerReady")].status`
-// +kubebuilder:printcolumn:name="Message",type=string,JSONPath=`.status.conditions[?(@.type=="SQSInformerReady")].message`
+// +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.conditions[?(@.type==\"SourceCrawlerReady\")].status"
+// +kubebuilder:printcolumn:name="Message",type="string",JSONPath=".status.conditions[?(@.type==\"SourceCrawlerReady\")].message"
 
-// SQSInformer is the Schema for the sqsinformers API.
-type SQSInformer struct {
+// SourceCrawler is the Schema for the sourcecrawlers API.
+type SourceCrawler struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   SQSInformerSpec   `json:"spec,omitempty"`
-	Status SQSInformerStatus `json:"status,omitempty"`
+	Spec   SourceCrawlerSpec   `json:"spec,omitempty"`
+	Status SourceCrawlerStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// SQSInformerList contains a list of SQSInformer.
-type SQSInformerList struct {
+// SourceCrawlerList contains a list of SourceCrawler.
+type SourceCrawlerList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []SQSInformer `json:"items"`
+	Items           []SourceCrawler `json:"items"`
 }
 
-func (c *SQSInformer) SetWaiting() {
+func (c *SourceCrawler) SetWaiting() {
 	condition := metav1.Condition{
-		Type:               SQSInformerCondition,
+		Type:               SourceCrawlerCondition,
 		LastTransitionTime: metav1.Now(),
 		Status:             metav1.ConditionUnknown,
-		Message:            "SQSInformer is getting reconciled",
+		Message:            "SourceCrawler is getting reconciled",
 		Reason:             "Waiting",
 	}
 	for i, currentCondition := range c.Status.Conditions {
@@ -75,13 +94,9 @@ func (c *SQSInformer) SetWaiting() {
 	c.Status.Conditions = append(c.Status.Conditions, condition)
 }
 
-// UpdateStatus updates the status of the SQSInformer CR
-// It takes a message and an error, and updates the status of the CR accordingly
-// If the error is nil, the status is set to True and the message is set to the message
-// If the error is not nil, the status is set to False and the message is set to the message and the error
-func (c *SQSInformer) UpdateStatus(message string, err error) {
+func (c *SourceCrawler) UpdateStatus(message string, err error) {
 	condition := metav1.Condition{
-		Type:               SQSInformerCondition,
+		Type:               SourceCrawlerCondition,
 		LastTransitionTime: metav1.Now(),
 	}
 	if err == nil {
@@ -105,5 +120,5 @@ func (c *SQSInformer) UpdateStatus(message string, err error) {
 }
 
 func init() {
-	SchemeBuilder.Register(&SQSInformer{}, &SQSInformerList{})
+	SchemeBuilder.Register(&SourceCrawler{}, &SourceCrawlerList{})
 }

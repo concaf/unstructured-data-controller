@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 
-	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -33,26 +32,4 @@ func StatusPatch(ctx context.Context, c client.Client, obj client.Object, mutate
 	}
 	mutate()
 	return c.Status().Patch(ctx, obj, client.MergeFrom(base))
-}
-
-// RemoveForceReconcileLabelWithRetry gets the latest object, removes the force-reconcile label, and updates with retry.
-func RemoveForceReconcileLabelWithRetry(ctx context.Context, c client.Client, key client.ObjectKey, newEmpty func() client.Object) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		obj := newEmpty()
-		if err := c.Get(ctx, key, obj); err != nil {
-			return err
-		}
-		return RemoveForceReconcileLabel(ctx, c, obj)
-	})
-}
-
-// AddForceReconcileLabelWithRetry gets the latest object, adds the force-reconcile label, and updates with retry.
-func AddForceReconcileLabelWithRetry(ctx context.Context, c client.Client, key client.ObjectKey, newEmpty func() client.Object) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		obj := newEmpty()
-		if err := c.Get(ctx, key, obj); err != nil {
-			return err
-		}
-		return AddForceReconcileLabel(ctx, c, obj)
-	})
 }

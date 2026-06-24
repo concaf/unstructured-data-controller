@@ -78,6 +78,7 @@ linters:
     generated: lax
     rules:
       - linters:
+          - dupl
           - errchkjson
           - lll
         path: api/*

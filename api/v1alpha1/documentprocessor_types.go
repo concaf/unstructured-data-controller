@@ -22,13 +22,35 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// sample spec:
+//
+//	spec:
+//	  stageName: convert
+//	  dependsOn:
+//	    - name: crawl                        # upstream stage name
+//	      type: SourceCrawler                      # upstream stage type
+//	  config:
+//	    type: docling
+//	    doclingConfig:
+//	      from_formats: [pdf, docx, html]
+//	      do_ocr: true
+//	      ocr_engine: easyocr
+//	      table_mode: accurate
+//	status:
+//	  conditions:
+//	    - type: DocumentProcessorReady
+//	      status: "True"
+//	      message: successfully reconciled
+//	  jobs: []                               # tracks in-flight docling conversion jobs
+
 const (
 	DocumentProcessorCondition = "DocumentProcessorReady"
 )
 
 // DocumentProcessorSpec defines the desired state of DocumentProcessor
 type DocumentProcessorSpec struct {
-	DataProduct             string                  `json:"dataProduct,omitempty"`
+	StageName               string                  `json:"stageName,omitempty"`
+	DependsOn               []StageDependency       `json:"dependsOn,omitempty"`
 	DocumentProcessorConfig DocumentProcessorConfig `json:"config,omitempty"`
 }
 

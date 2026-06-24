@@ -22,13 +22,29 @@ import (
 
 type EmbeddingProvider string
 
+// sample spec:
+//
+//	spec:
+//	  stageName: embed
+//	  dependsOn:
+//	    - name: chunk
+//	      type: ChunksGenerator
+//	  embeddingGeneratorConfig:
+//	    modelName: nomic-embed-text-v1.5
+//	status:
+//	  conditions:
+//	    - type: VectorEmbeddingGenerationReady
+//	      status: "True"
+//	      message: successfully reconciled
+
 const (
 	VectorEmbeddingGenerationConditionType = "VectorEmbeddingGenerationReady"
 )
 
 // VectorEmbeddingsGeneratorSpec defines the desired state of VectorEmbeddingsGenerator.
 type VectorEmbeddingsGeneratorSpec struct {
-	DataProduct                     string                          `json:"dataProduct,omitempty"`
+	StageName                       string                          `json:"stageName,omitempty"`
+	DependsOn                       []StageDependency               `json:"dependsOn,omitempty"`
 	VectorEmbeddingsGeneratorConfig VectorEmbeddingsGeneratorConfig `json:"embeddingGeneratorConfig,omitempty"`
 }
 

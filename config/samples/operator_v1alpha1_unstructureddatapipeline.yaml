@@ -4,48 +4,44 @@ metadata:
   labels:
     app.kubernetes.io/name: unstructured-data-controller
     app.kubernetes.io/managed-by: kustomize
-  name: testunstructureddataproduct
+  name: my-pipeline
 spec:
-  sourceConfig:
-    type: "s3"
-    s3Config:
-      bucket: data-ingestion-bucket
-      prefix: testunstructureddataproduct
-  documentProcessorConfig:
-    type: "docling"
-    doclingConfig:
-      from_formats:
-        - pdf
-        - docx
-        - doc
-        - txt
-        - html
-        - md
-        - csv
-        - xlsx
-      to_formats:
-        - md
-      image_export_mode: "copy"
-      do_ocr: true
-      force_ocr: false
-      ocr_engine: "tesseract"
-      ocr_lang: ["en"]
-      pdf_backend: "pypdf"
-      table_mode: "none"
-      abort_on_error: true
-  chunksGeneratorConfig:
-    strategy: "recursiveCharacterTextSplitter"
-    recursiveCharacterSplitterConfig:
-      chunkSize: 1000
-      chunkOverlap: 5
-      keepSeparator: true
-      separators: ["\n\n", "\n", " ", ""]
-  vectorEmbeddingsGeneratorConfig:
-    modelName: "nomic-ai/nomic-embed-text-v1.5"
-    nomicEmbedTextV15Config:
-      encodingformat: "float"
-  destinationConfig:
-    type: "s3"
-    s3DestinationConfig:
-      bucket: output-chunks-bucket
-      prefix: testunstructureddataproduct
+  secretRef: pipeline-secret
+  stages:
+    - name: crawl
+      type: SourceCrawler
+      sourceCrawlerConfig:
+        type: s3
+        s3Config:
+          bucket: data-ingestion-bucket
+          prefix: documents/
+    - name: convert
+      type: DocumentProcessor
+      dependsOn: [crawl]
+      documentProcessorConfig:
+        type: docling
+        doclingConfig:
+          from_formats: [pdf, docx, html]
+          do_ocr: true
+          ocr_engine: easyocr
+    - name: chunk
+      type: ChunksGenerator
+      dependsOn: [convert]
+      chunksGeneratorConfig:
+        strategy: recursiveCharacterTextSplitter
+        recursiveCharacterSplitterConfig:
+          chunkSize: 1000
+          chunkOverlap: 200
+    - name: embed
+      type: VectorEmbeddingsGenerator
+      dependsOn: [chunk]
+      vectorEmbeddingsGeneratorConfig:
+        modelName: nomic-ai/nomic-embed-text-v1.5
+    - name: sync
+      type: DestinationSyncer
+      dependsOn: [embed]
+      destinationSyncerConfig:
+        type: s3
+        s3DestinationConfig:
+          bucket: output-bucket
+          prefix: processed/

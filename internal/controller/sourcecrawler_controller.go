@@ -1,0 +1,258 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	operatorv1alpha1 "github.com/redhat-data-and-ai/unstructured-data-controller/api/v1alpha1"
+	"github.com/redhat-data-and-ai/unstructured-data-controller/internal/controller/controllerutils"
+	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/awsclienthandler"
+	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/filestore"
+	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/unstructured"
+)
+
+const (
+	SourceCrawlerControllerName  = "SourceCrawler"
+	sqsPollInterval              = 15 * time.Second
+	defaultCrawlerResyncInterval = 5 * time.Minute
+)
+
+// SourceCrawlerReconciler reconciles a SourceCrawler object
+type SourceCrawlerReconciler struct {
+	client.Client
+	Scheme    *runtime.Scheme
+	fileStore *filestore.FileStore
+}
+
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=sourcecrawlers,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=sourcecrawlers/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=sourcecrawlers/finalizers,verbs=update
+// +kubebuilder:rbac:groups="",namespace=unstructured-controller-namespace,resources=secrets,verbs=get;list;watch
+
+func (r *SourceCrawlerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("reconciling", "controller", SourceCrawlerControllerName)
+
+	isHealthy, err := IsConfigCRHealthy(ctx, r.Client, req.Namespace)
+	if err != nil {
+		logger.Error(err, "failed to check if ControllerConfig CR is healthy")
+		return ctrl.Result{}, err
+	}
+	if !isHealthy {
+		logger.Info("ControllerConfig CR is not ready yet, will try again in a bit ...")
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
+	sourceCrawlerCR := &operatorv1alpha1.SourceCrawler{}
+	if err := r.Get(ctx, req.NamespacedName, sourceCrawlerCR); err != nil {
+		logger.Error(err, "failed to get SourceCrawler CR")
+		return ctrl.Result{}, err
+	}
+
+	if err := controllerutils.StatusPatch(ctx, r.Client, sourceCrawlerCR, func() {
+		sourceCrawlerCR.SetWaiting()
+	}); err != nil {
+		logger.Error(err, "failed to update SourceCrawler CR status")
+		return ctrl.Result{}, err
+	}
+
+	fs, err := filestore.New(ctx, cacheDirectory, dataStorageBucket)
+	if err != nil {
+		if IsAWSClientNotInitializedError(err) {
+			logger.Info("ControllerConfig has not initialized AWS clients yet, will try again in a bit ...")
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		}
+		return r.handleError(ctx, sourceCrawlerCR, fmt.Errorf("failed to create filestore: %w", err))
+	}
+	r.fileStore = fs
+
+	parentPipeline, err := controllerutils.ParentPipelineNameFromOwnerReference(sourceCrawlerCR)
+	if err != nil {
+		return r.handleError(ctx, sourceCrawlerCR, err)
+	}
+	sourceCrawlerConfig := sourceCrawlerCR.Spec.SourceCrawlerConfig
+	outputDir := unstructured.StagePath(parentPipeline, sourceCrawlerCR.Spec.StageName)
+
+	// fetch source credentials and create S3 client
+	sourceAWSConfig, err := controllerutils.AWSConfigFromSecret(ctx, r.Client, sourceCrawlerCR.Spec.SecretRef, sourceCrawlerCR.Namespace)
+	if err != nil {
+		return r.handleError(ctx, sourceCrawlerCR, fmt.Errorf("failed to get source credentials: %w", err))
+	}
+	sourceS3Client, err := awsclienthandler.NewS3Client(ctx, sourceAWSConfig)
+	if err != nil {
+		return r.handleError(ctx, sourceCrawlerCR, fmt.Errorf("failed to create source S3 client: %w", err))
+	}
+
+	var source unstructured.DataSource
+	switch sourceCrawlerConfig.Type {
+	case operatorv1alpha1.TypeS3:
+		source = &unstructured.S3BucketSource{
+			S3Client:  sourceS3Client,
+			Bucket:    sourceCrawlerConfig.S3Config.Bucket,
+			Prefix:    sourceCrawlerConfig.S3Config.Prefix,
+			OutputDir: outputDir,
+		}
+	default:
+		return r.handleError(ctx, sourceCrawlerCR, fmt.Errorf("unsupported source type: %s", sourceCrawlerConfig.Type))
+	}
+
+	storedFiles, err := source.SyncFilesToFilestore(ctx, r.fileStore)
+	if err != nil {
+		return r.handleError(ctx, sourceCrawlerCR, fmt.Errorf("failed to store files to filestore: %w", err))
+	}
+	logger.Info("successfully stored files to filestore", "count", len(storedFiles))
+
+	successMessage := fmt.Sprintf("successfully reconciled source crawler: %s", sourceCrawlerCR.Name)
+	if err := controllerutils.StatusPatch(ctx, r.Client, sourceCrawlerCR, func() {
+		sourceCrawlerCR.UpdateStatus(successMessage, nil)
+	}); err != nil {
+		logger.Error(err, "failed to update SourceCrawler CR status")
+		return r.handleError(ctx, sourceCrawlerCR, err)
+	}
+
+	// determine requeue strategy based on SQS configuration
+	sqsQueueURL := sourceCrawlerConfig.S3Config.SQSQueueURL
+	if sqsQueueURL != "" {
+		return handleSQSWakeUp(ctx, sqsQueueURL, sourceCrawlerConfig.S3Config.Bucket, sourceCrawlerConfig.S3Config.Prefix)
+	}
+	return ctrl.Result{RequeueAfter: defaultCrawlerResyncInterval}, nil
+}
+
+func handleSQSWakeUp(ctx context.Context, queueURL, bucket, prefix string) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	sqsClient, err := awsclienthandler.GetSQSClient()
+	if err != nil {
+		logger.Info("SQS client not initialized yet, will retry", "error", err)
+		return ctrl.Result{RequeueAfter: sqsPollInterval}, nil
+	}
+
+	hasMessages, err := awsclienthandler.DrainSQSQueue(ctx, sqsClient, queueURL, bucket, prefix)
+	if err != nil {
+		logger.Error(err, "failed to drain SQS queue")
+		return ctrl.Result{RequeueAfter: sqsPollInterval}, nil
+	}
+
+	if hasMessages {
+		logger.Info("SQS messages received, requeuing immediately for state diff")
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	return ctrl.Result{RequeueAfter: sqsPollInterval}, nil
+}
+
+func (r *SourceCrawlerReconciler) handleError(ctx context.Context, sourceCrawlerCR *operatorv1alpha1.SourceCrawler, err error) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Error(err, "encountered error")
+	reconcileErr := err
+	if updateErr := controllerutils.StatusPatch(ctx, r.Client, sourceCrawlerCR, func() {
+		sourceCrawlerCR.UpdateStatus("", reconcileErr)
+	}); updateErr != nil {
+		logger.Error(updateErr, "failed to update SourceCrawler CR status")
+		return ctrl.Result{}, updateErr
+	}
+	return ctrl.Result{}, reconcileErr
+}
+
+// findDependents maps a changed pipeline stage back to the SourceCrawlers that depend on it.
+//
+// Given a SourceCrawler CR like:
+//
+//	apiVersion: operator.dataverse.redhat.com/v1alpha1
+//	kind: SourceCrawler
+//	metadata:
+//	  name: my-crawler
+//	  ownerReferences:
+//	    - name: my-pipeline        # ← ParentPipelineNameFromOwnerReference returns "my-pipeline"
+//	spec:
+//	  depends:
+//	    - name: chunker            # ← dependency name
+//	    - name: doc-processor
+//
+// If a DocumentProcessor named "my-pipeline-doc-processor" changes,
+// this function matches it via: "my-pipeline" + "-" + "doc-processor" == "my-pipeline-doc-processor"
+// and enqueues "my-crawler" for reconciliation.
+func (r *SourceCrawlerReconciler) findDependents(ctx context.Context, obj client.Object) []reconcile.Request {
+	// obj is the object that has changed, so it's not SourceCrawler
+	list := &operatorv1alpha1.SourceCrawlerList{}
+	if err := r.List(ctx, list, client.InNamespace(obj.GetNamespace())); err != nil {
+		return nil
+	}
+	changedName := obj.GetName()
+	var requests []reconcile.Request
+	for _, item := range list.Items {
+		pipelineName, err := controllerutils.ParentPipelineNameFromOwnerReference(&item)
+		if err != nil {
+			continue
+		}
+		for _, dep := range item.Spec.DependsOn {
+			if pipelineName+"-"+dep.Name == changedName {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: item.Name, Namespace: item.Namespace},
+				})
+				break
+			}
+		}
+	}
+	return requests
+}
+
+// findSecretDependents returns reconcile requests for SourceCrawlers that reference the changed Secret via SecretRef.
+func (r *SourceCrawlerReconciler) findSecretDependents(ctx context.Context, obj client.Object) []reconcile.Request {
+	list := &operatorv1alpha1.SourceCrawlerList{}
+	if err := r.List(ctx, list, client.InNamespace(obj.GetNamespace())); err != nil {
+		return nil
+	}
+	secretName := obj.GetName()
+	var requests []reconcile.Request
+	for _, item := range list.Items {
+		if item.Spec.SecretRef == secretName {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: item.Name, Namespace: item.Namespace},
+			})
+		}
+	}
+	return requests
+}
+
+// SetupWithManager registers watches on all downstream pipeline stages and secrets so that
+// changes to any dependency trigger a reconcile of the owning SourceCrawler.
+func (r *SourceCrawlerReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&operatorv1alpha1.SourceCrawler{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&operatorv1alpha1.DocumentProcessor{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
+		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
+		Watches(&operatorv1alpha1.VectorEmbeddingsGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
+		Watches(&operatorv1alpha1.DestinationSyncer{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.findSecretDependents)).
+		Named("sourcecrawler").
+		Complete(r)
+}

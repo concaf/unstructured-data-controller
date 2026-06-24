@@ -17,79 +17,38 @@ limitations under the License.
 package unstructured
 
 import (
+	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 )
 
-const (
-	MetadataFileSuffix         = "-metadata.json"
-	ConvertedFileSuffix        = "-converted.json"
-	ChunksFileSuffix           = "-chunks.json"
-	VectorEmbeddingsFileSuffix = "-vector-embeddings.json"
-)
+// StagePath returns the S3 prefix for a stage's output directory.
+// e.g. StagePath("my-pipeline", "crawl") => "pipelines/my-pipeline/stages/crawl/"
+func StagePath(pipelineName, stageName string) string {
+	return path.Join("pipelines", pipelineName, "stages", stageName) + "/"
+}
+
+// RemapToOutputDir maps a file from an input stage directory to the output stage directory.
+// e.g. ("stages/crawl/f.pdf", "stages/crawl/", "stages/convert/") => "stages/convert/f.pdf"
+func RemapToOutputDir(filePath, inputDir, outputDir string) string {
+	rel := strings.TrimPrefix(filePath, inputDir)
+	return filepath.Join(outputDir, rel)
+}
 
 type RawFileMetadata struct {
 	FilePath string `json:"filePath,omitempty"`
 	UID      string `json:"uid,omitempty"`
 }
 
-func GetMetadataFilePath(rawFilePath string) string {
-	return rawFilePath + MetadataFileSuffix
-}
-
-func GetConvertedFilePath(rawFilePath string) string {
-	return rawFilePath + ConvertedFileSuffix
-}
-
-func GetChunksFilePath(rawFilePath string) string {
-	return rawFilePath + ChunksFileSuffix
-}
-
-func GetVectorEmbeddingsFilePath(rawFilePath string) string {
-	return rawFilePath + VectorEmbeddingsFileSuffix
-}
-
-func GetRawFilePathFromConvertedFilePath(convertedFilePath string) string {
-	return strings.TrimSuffix(convertedFilePath, ConvertedFileSuffix)
-}
-
-func FilterConvertedFilePaths(filePaths []string) []string {
-	convertedFilePaths := []string{}
-
-	for _, filePath := range filePaths {
-		if strings.HasSuffix(filePath, ConvertedFileSuffix) {
-			convertedFilePaths = append(convertedFilePaths, filePath)
-		}
-	}
-	return convertedFilePaths
-}
-
-func FilterChunksFilePaths(filePaths []string) []string {
-	chunksFilePaths := []string{}
-	for _, filePath := range filePaths {
-		if strings.HasSuffix(filePath, ChunksFileSuffix) {
-			chunksFilePaths = append(chunksFilePaths, filePath)
-		}
-	}
-	return chunksFilePaths
-}
-
-func FilterVectorEmbeddingsFilePaths(filePaths []string) []string {
-	embeddingsFilePaths := []string{}
-	for _, filePath := range filePaths {
-		if strings.HasSuffix(filePath, VectorEmbeddingsFileSuffix) {
-			embeddingsFilePaths = append(embeddingsFilePaths, filePath)
-		}
-	}
-	return embeddingsFilePaths
+func MetadataPath(rawFilePath string) string {
+	return rawFilePath + ".json"
 }
 
 func FilterRawFilePaths(filePaths []string) []string {
 	rawFilePaths := []string{}
 	for _, filePath := range filePaths {
-		if strings.HasSuffix(filePath, MetadataFileSuffix) {
-			// this means that the metadata file exists ... now let's check if the raw file exists as well in the filePaths list
-			rawFilePath := strings.TrimSuffix(filePath, MetadataFileSuffix)
+		if rawFilePath, ok := strings.CutSuffix(filePath, ".json"); ok {
 			if slices.Contains(filePaths, rawFilePath) {
 				rawFilePaths = append(rawFilePaths, rawFilePath)
 			}

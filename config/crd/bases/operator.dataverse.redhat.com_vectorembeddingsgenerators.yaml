@@ -48,8 +48,28 @@ spec:
             description: VectorEmbeddingsGeneratorSpec defines the desired state of
               VectorEmbeddingsGenerator.
             properties:
-              dataProduct:
-                type: string
+              dependsOn:
+                items:
+                  description: StageDependency identifies an upstream stage by name
+                    and type.
+                  properties:
+                    name:
+                      type: string
+                    type:
+                      description: StageType is the discriminator for the stage union
+                        config.
+                      enum:
+                      - SourceCrawler
+                      - DocumentProcessor
+                      - ChunksGenerator
+                      - VectorEmbeddingsGenerator
+                      - DestinationSyncer
+                      type: string
+                  required:
+                  - name
+                  - type
+                  type: object
+                type: array
               embeddingGeneratorConfig:
                 properties:
                   modelName:
@@ -60,6 +80,8 @@ spec:
                         type: string
                     type: object
                 type: object
+              stageName:
+                type: string
             type: object
           status:
             description: VectorEmbeddingsGeneratorStatus defines the observed state

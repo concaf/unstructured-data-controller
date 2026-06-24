@@ -119,6 +119,15 @@ func NewClientFromURL(clientConfig *ClientConfig) *Client {
 	}
 }
 
+// safeRelease releases a semaphore slot without panicking if the semaphore
+// has no outstanding acquisitions (e.g. after a controller restart with stale jobs).
+func (c *Client) safeRelease() {
+	defer func() {
+		recover()
+	}()
+	c.ClientConfig.sem.Release(1)
+}
+
 func (c *Client) convertSourceAsyncEndpoint() (string, error) {
 	return url.JoinPath(c.ClientConfig.URL, "/v1/convert/source/async")
 }
@@ -221,6 +230,13 @@ func (c *Client) ConvertFile(
 	if !acquired {
 		return nil, errors.New(SemaphoreAcquireError)
 	}
+	// release the semaphore if the request fails before docling accepts the task
+	success := false
+	defer func() {
+		if !success {
+			c.ClientConfig.sem.Release(1)
+		}
+	}()
 
 	convertSourceAsyncEndpoint, err := c.convertSourceAsyncEndpoint()
 	if err != nil {
@@ -253,6 +269,7 @@ func (c *Client) ConvertFile(
 	if err != nil {
 		return nil, fmt.Errorf("failed to get response body: %w", err)
 	}
+	defer responseBody.Close()
 
 	body, err := io.ReadAll(responseBody)
 	if err != nil {
@@ -263,13 +280,8 @@ func (c *Client) ConvertFile(
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	defer func() {
-		if err = responseBody.Close(); err != nil {
-			err = fmt.Errorf("failed to close response body: %w", err)
-		}
-	}()
-
-	return &asyncResponse, err
+	success = true
+	return &asyncResponse, nil
 }
 
 func (c *Client) getTaskStatus(ctx context.Context, taskID string) (bool, *TaskStatusResponse, error) {
@@ -306,18 +318,19 @@ func (c *Client) GetConvertedFile(ctx context.Context, taskID string) (TaskStatu
 	// get the task status
 	isValidStatus, taskStatus, err := c.getTaskStatus(ctx, taskID)
 	if err != nil {
+		c.safeRelease()
 		return "", nil, fmt.Errorf("failed to get task status: %w", err)
 	}
 
 	if !isValidStatus {
 		// for some reason invalid task status received, we will return the error and release the semaphore
-		c.ClientConfig.sem.Release(1)
+		c.safeRelease()
 		return "", nil, fmt.Errorf("invalid task status received for task id: %s", taskID)
 	}
 
 	if taskStatus.TaskStatus == TaskStatusFailure {
-		// for some reason invalid task status received, we will return the error and release the semaphore
-		c.ClientConfig.sem.Release(1)
+		// task failed, release the semaphore
+		c.safeRelease()
 		return "", nil, fmt.Errorf("task failed: task id: %s", taskID)
 	}
 
@@ -329,6 +342,7 @@ func (c *Client) GetConvertedFile(ctx context.Context, taskID string) (TaskStatu
 	// let's fetch the result from the task now
 	taskResultURL, err := c.getTaskResultEndpoint(taskID)
 	if err != nil {
+		c.safeRelease()
 		return "", nil, fmt.Errorf("failed to get task result endpoint: %w", err)
 	}
 
@@ -336,18 +350,15 @@ func (c *Client) GetConvertedFile(ctx context.Context, taskID string) (TaskStatu
 	var doclingResponse DoclingResponse
 	bodyResponse, err := c.createDoclingRequest(ctx, http.MethodGet, taskResultURL, nil)
 	if err != nil {
+		c.safeRelease()
 		return "", nil, fmt.Errorf("failed to get response body: %w", err)
 	}
+	defer bodyResponse.Close()
 
 	if err := json.NewDecoder(bodyResponse).Decode(&doclingResponse); err != nil {
+		c.safeRelease()
 		return "", nil, fmt.Errorf("failed to decode response: %w", err)
 	}
-
-	defer func() {
-		if err = bodyResponse.Close(); err != nil {
-			err = fmt.Errorf("failed to close response body: %w", err)
-		}
-	}()
 
 	// now let's free up the semaphore based on task status
 	switch doclingResponse.Status {
@@ -357,12 +368,13 @@ func (c *Client) GetConvertedFile(ctx context.Context, taskID string) (TaskStatu
 	case TaskStatusFailure, TaskStatusSkipped:
 		// free up the semaphore because the processing in docling is completed
 		logger.Error(fmt.Errorf("task failed: task id: %s", taskID), "task failed")
-		c.ClientConfig.sem.Release(1)
+		c.safeRelease()
 	case TaskStatusPartialSuccess, TaskStatusSuccess:
 		// free up the semaphore because the processing in docling is completed
 		logger.Info("task completed successfully", "task id", taskID)
-		c.ClientConfig.sem.Release(1)
+		c.safeRelease()
 	default:
+		c.safeRelease()
 		return "", nil, fmt.Errorf("invalid task status received for task id: %s", taskID)
 	}
 

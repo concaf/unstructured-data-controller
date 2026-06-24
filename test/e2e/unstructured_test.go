@@ -22,9 +22,12 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,6 +37,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/redhat-data-and-ai/unstructured-data-controller/api/v1alpha1"
 	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/awsclienthandler"
+	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/docling"
 	operatorUtils "github.com/redhat-data-and-ai/unstructured-data-controller/test/utils"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -47,13 +51,16 @@ import (
 func TestUnstructuredDataLoad(t *testing.T) {
 	feature := features.New("Unstructured Data Load")
 
+	// generate a unique string
+	uniqueTestString := operatorUtils.RandomStringGenerator(10)
 	unstructuredBucketName := "unstructured-bucket"
 	unstructuredDataStorageBucketName := "data-storage-bucket"
-	outputChunksBucketName := "output-chunks-bucket"
 	unstructuredQueueName := "unstructured-queue"
 
+	operatorControllerConfig := operatorUtils.GetControllerConfigResource()
+	databaseName := "unstructured_db"
 	schemaName := "unstructured"
-	dataProductCRName := schemaName
+	dataPipelineCRName := schemaName
 
 	queueURL := "http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/" + unstructuredQueueName
 	unstructuredFilesDirectory := "test/resources/unstructured/unstructured-files"
@@ -118,14 +125,6 @@ func TestUnstructuredDataLoad(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// create output chunks bucket
-			_, err = s3Client.CreateBucket(ctx, &s3.CreateBucketInput{
-				Bucket: aws.String(outputChunksBucketName),
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-
 			// create SQS queue
 			_, err = sqsClient.CreateQueue(ctx, &sqs.CreateQueueInput{
 				QueueName: aws.String(unstructuredQueueName),
@@ -170,8 +169,17 @@ func TestUnstructuredDataLoad(t *testing.T) {
 				t.Error(err)
 			}
 
+				t.Fatalf("Failed to create internal stage: %s", err)
+			}
+
+			// register cleanup function to ensure stage is dropped even if test fails with t.Fatal()
+			t.Cleanup(func() {
+					t.Logf("Warning: failed to drop stage in cleanup: %v", err)
+				} else {
+				}
+			})
 			// create unstructured data pipeline CR
-			unstructuredDataPipeline := operatorUtils.GetUnstructuredDataPipelineResource(dataProductCRName, testNamespace)
+			unstructuredDataPipeline := operatorUtils.GetUnstructuredDataPipelineResourceWithStage(dataPipelineCRName, testNamespace)
 			t.Log("create unstructured datapipeline CR ...")
 			if err := kubeClient.Resources(testNamespace).Create(ctx, &unstructuredDataPipeline); err != nil {
 				if !apierrors.IsAlreadyExists(err) {
@@ -181,7 +189,7 @@ func TestUnstructuredDataLoad(t *testing.T) {
 
 			// wait for unstructured data pipeline CR to be healthy
 			t.Log("wait for unstructured data pipeline CR to be healthy")
-			if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
+			if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataPipelineCRName, testNamespace); err != nil {
 				t.Error(err)
 			}
 			t.Log("unstructured data pipeline CR is healthy")
@@ -190,7 +198,6 @@ func TestUnstructuredDataLoad(t *testing.T) {
 		},
 	)
 
-	feature.Assess("upload files to unstructured bucket and verify they land in output chunks bucket", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 		// create AWS clients for file operations
 		err := awsclienthandler.NewSourceS3ClientFromConfig(ctx, &awsclienthandler.AWSConfig{
 			Region:          "us-east-1",
@@ -240,60 +247,98 @@ func TestUnstructuredDataLoad(t *testing.T) {
 			t.Logf("uploaded test file: %s", key)
 		}
 
-		// wait for files to be processed and appear in the output chunks bucket
-		t.Log("wait for files to be processed and appear in output chunks bucket ...")
+		// wait for files to be ingested
+		t.Log("wait for files to be ingested ...")
 
-		var outputFiles []string
+		// verify stage files by querying for filenames from JSON content
+		type stageFileData struct {
+			FileName string `db:"file_name"`
+		}
+		stageFiles := []stageFileData{}
+
 		if err := apimachinerywait.PollUntilContextTimeout(
 			context.Background(),
 			5*time.Second,
 			10*time.Minute,
 			false,
 			func(ctx context.Context) (done bool, err error) {
-				output, err := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-					Bucket: aws.String(outputChunksBucketName),
-					Prefix: aws.String(schemaName + "/"),
-				})
-				if err != nil {
-					t.Logf("error listing output chunks bucket: %v, retrying ...", err)
+				filesInStage := []stageFileData{}
+					ctx,
+					stageFileQuery,
+					&filesInStage,
+				); err != nil {
+					t.Error(err)
 					return false, nil
 				}
-				if len(output.Contents) < len(files) {
-					t.Logf("expected at least %d files in output chunks bucket, got %d, retrying ...", len(files), len(output.Contents))
+				if len(filesInStage) != len(files) {
+					t.Logf("expected %d files in stage, got %d, retrying ...", len(files), len(filesInStage))
 					return false, nil
 				}
-				outputFiles = make([]string, 0, len(output.Contents))
-				for _, obj := range output.Contents {
-					outputFiles = append(outputFiles, *obj.Key)
-				}
+				// we're doing this circus to prevent global stageFiles from being appended over and over
+				stageFiles = filesInStage
 				return true, nil
 			},
 		); err != nil {
 			t.Error(err)
 		}
 
-		t.Logf("output chunk files: %+v", outputFiles)
+		t.Logf("stage files: %+v", stageFiles)
 
-		// make sure all the source files have corresponding output in the chunks bucket
+		// make sure all the files are ingested
 		for _, file := range files {
 			found := false
-			expectedPrefix := fmt.Sprintf("%s/%s", schemaName, file.Name())
-			for _, outputFile := range outputFiles {
-				if len(outputFile) >= len(expectedPrefix) && outputFile[:len(expectedPrefix)] == expectedPrefix {
-					t.Logf("file %s processed successfully", file.Name())
+			expectedFilePath := fmt.Sprintf("%s/%s", schemaName, file.Name())
+			for _, ingestedFile := range stageFiles {
+				if ingestedFile.FileName == expectedFilePath {
+					t.Logf("file %s ingested successfully", file.Name())
 					found = true
 					break
 				}
 			}
 			if !found {
-				t.Errorf("file %s not found in output chunks bucket (expected prefix: %s)", file.Name(), expectedPrefix)
+				t.Errorf("file %s not ingested (expected path: %s)", file.Name(), expectedFilePath)
 			}
+		}
+
+		type data struct {
+			FileName        string `db:"file_name"`
+			MarkdownContent string `db:"markdown_content"`
+		}
+
+		t.Log("verifying data in stage ...")
+
+		stageRows := []data{}
+			ctx,
+			stageSqlQuery,
+			&stageRows,
+		); err != nil {
+			t.Error(err)
+		}
+
+		for _, row := range stageRows {
+			mdContent := row.MarkdownContent
+			fileName := row.FileName
+			if len(mdContent) < 10 {
+				t.Errorf("markdown content is almost empty for file %s", fileName)
+			}
+			// verify the ingested files rawFilePath matches the file name
+			matched := false
+			for _, file := range files {
+				expectedFilePath := fmt.Sprintf("%s/%s", schemaName, file.Name())
+				if expectedFilePath == fileName {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				t.Errorf("the ingested file rawFilePath %s does not match with any of the files in the directory", fileName)
+			}
+
 		}
 
 		return ctx
 	})
 
-	feature.Assess("Deletion of file from the bucket and verifying removal from output chunks bucket", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 		// create a new s3 client
 		t.Log("Creating s3 client ...")
 		err := awsclienthandler.NewSourceS3ClientFromConfig(ctx, &awsclienthandler.AWSConfig{
@@ -311,7 +356,7 @@ func TestUnstructuredDataLoad(t *testing.T) {
 			t.Error(err)
 		}
 
-		// list all the files in the unstructured bucket as we have ingested files in the last step
+		// list all the files in the unstructured-Bucket as we have ingested files in the last step
 		t.Log("Listing objects from unstructured bucket ...")
 		output, err := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 			Bucket: aws.String(unstructuredBucketName),
@@ -328,7 +373,7 @@ func TestUnstructuredDataLoad(t *testing.T) {
 			filesinBucket = append(filesinBucket, *file.Key)
 		}
 
-		// verify the count is at least 1
+		// verify the count is atleast 1
 		if len(filesinBucket) == 0 {
 			t.Error("Unable to list file from the bucket")
 		}
@@ -350,12 +395,18 @@ func TestUnstructuredDataLoad(t *testing.T) {
 		// delete the 0th index element from the slice as well
 		filesinBucket = filesinBucket[1:]
 
-		// wait for 10 seconds
+		// wait for 10 seconds with the log message "waiting for 10 seconds"
 		t.Log("waiting for 10 seconds")
 		time.Sleep(10 * time.Second)
 
-		// wait for the deleted file to be removed from the output chunks bucket
-		t.Log("wait for deleted file to be removed from output chunks bucket ...")
+		// wait for files to be ingested
+		t.Log("wait for files to be updated in the internal stage ...")
+
+		// verify stage files by querying for filenames from JSON content
+		type stageFileData struct {
+			FileName string `db:"file_name"`
+		}
+		stageFiles := []stageFileData{}
 
 		if err := apimachinerywait.PollUntilContextTimeout(
 			context.Background(),
@@ -363,30 +414,72 @@ func TestUnstructuredDataLoad(t *testing.T) {
 			10*time.Minute,
 			false,
 			func(ctx context.Context) (done bool, err error) {
-				outputObjects, err := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-					Bucket: aws.String(outputChunksBucketName),
-					Prefix: aws.String(fileToDelete),
-				})
-				if err != nil {
-					t.Logf("error listing output chunks bucket: %v, retrying ...", err)
+				filesInStage := []stageFileData{}
+					ctx,
+					stageFileQuery,
+					&filesInStage,
+				); err != nil {
+					t.Error(err)
 					return false, nil
 				}
-				if len(outputObjects.Contents) > 0 {
-					t.Logf("deleted file %s still present in output chunks bucket (%d objects), retrying ...", fileToDelete, len(outputObjects.Contents))
+				if len(filesInStage) != len(filesinBucket) {
+					t.Logf("expected %d files in stage, got %d, retrying ...", len(filesinBucket), len(filesInStage))
 					return false, nil
 				}
+				// we're doing this circus to prevent global stageFiles from being appended over and over
+				stageFiles = filesInStage
 				return true, nil
 			},
 		); err != nil {
 			t.Error(err)
 		}
 
-		t.Logf("deleted file %s is not present in the output chunks bucket", fileToDelete)
+		t.Logf("stage files: %+v", stageFiles)
+
+		// Now iterate over the stageFiles and check if deleted file is still present
+		for _, ingestedFile := range stageFiles {
+			if strings.Contains(ingestedFile.FileName, fileToDelete) {
+				t.Errorf("deleted file %s is still present in the internal stage", fileToDelete)
+			}
+		}
+
+		t.Logf("deleted file %s is not present in the internal stage", fileToDelete)
 
 		return ctx
 	})
 
-	feature.Assess("Will change docling config and verify pipeline reconciles successfully", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+	feature.Assess("Will change docling config and verify the updation of files in the stage", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+		type data struct {
+			FileName        string `db:"file_name"`
+			DoclingConfig   string `db:"docling_config"`
+			MarkDownContent string `db:"markdown_content"`
+		}
+
+		type RowData struct {
+			FileName        string                `db:"file_name"`
+			DoclingConfig   docling.DoclingConfig `db:"docling_config"`
+			MarkDownContent string                `db:"markdown_content"`
+		}
+
+		rows := []data{}
+			t.Error(err)
+		}
+
+		rowsData := []RowData{}
+		for _, row := range rows {
+			doclingConfig := docling.DoclingConfig{}
+			if err := json.Unmarshal([]byte(row.DoclingConfig), &doclingConfig); err != nil {
+				t.Error(err)
+			}
+			rowsData = append(rowsData, RowData{
+				FileName:        row.FileName,
+				DoclingConfig:   doclingConfig,
+				MarkDownContent: row.MarkDownContent,
+			})
+		}
+
+		t.Logf("len of rows: %d", len(rows))
+
 		t.Log("Updating the docling config for the data product")
 		doclingConfig := &v1alpha1.DoclingConfig{
 			FromFormats:     []string{"pdf", "docx", "pptx", "xlsx"},
@@ -401,7 +494,7 @@ func TestUnstructuredDataLoad(t *testing.T) {
 
 		// fetch the latest version of the unstructured data pipeline CR
 		unstructuredDataPipelineCR := &v1alpha1.UnstructuredDataPipeline{}
-		if err := kubeClient.Resources().Get(ctx, dataProductCRName, testNamespace, unstructuredDataPipelineCR); err != nil {
+		if err := kubeClient.Resources().Get(ctx, dataPipelineCRName, testNamespace, unstructuredDataPipelineCR); err != nil {
 			t.Error(err)
 		}
 		unstructuredDataPipelineCR.Spec.DocumentProcessorConfig.DoclingConfig = *doclingConfig
@@ -411,40 +504,102 @@ func TestUnstructuredDataLoad(t *testing.T) {
 		t.Log("Successfully updated the docling config in the unstructured data pipeline CR")
 
 		// wait for the unstructured data pipeline CR to be ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
+		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataPipelineCRName, testNamespace); err != nil {
 			t.Error(err)
 		}
 
 		t.Log("UnstructuredDataPipeline successfully reconciled")
 
 		// wait for the document processor to be ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.DocumentProcessorCondition, "documentprocessors.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
+		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.DocumentProcessorCondition, "documentprocessors.operator.dataverse.redhat.com", dataPipelineCRName, testNamespace); err != nil {
 			t.Error(err)
 		}
 
 		t.Log("DocumentProcessor successfully reconciled")
 
 		// wait until the chunksgenerator CR is ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.ChunksGeneratorCondition, "chunksgenerators.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
+		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.ChunksGeneratorCondition, "chunksgenerators.operator.dataverse.redhat.com", dataPipelineCRName, testNamespace); err != nil {
 			t.Error(err)
 		}
 		t.Log("ChunksGenerator successfully reconciled")
 
 		// wait for the vector embeddings generator to be ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.VectorEmbeddingGenerationConditionType, "vectorembeddingsgenerators.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
+		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.VectorEmbeddingGenerationConditionType, "vectorembeddingsgenerators.operator.dataverse.redhat.com", dataPipelineCRName, testNamespace); err != nil {
 			t.Error(err)
 		}
 		t.Log("VectorEmbeddingsGenerator successfully reconciled")
 
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
+		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataPipelineCRName, testNamespace); err != nil {
 			t.Error(err)
 		}
-		t.Log("UnstructuredDataPipeline successfully reconciled after docling config update")
+		t.Log("UnstructuredDataPipeline successfully reconciled, now files are up to date in the internal stage")
+
+		stageRows := []data{}
+			t.Error(err)
+		}
+
+		stageRowsData := []RowData{}
+		for _, row := range stageRows {
+			doclingConfig := docling.DoclingConfig{}
+			if err := json.Unmarshal([]byte(row.DoclingConfig), &doclingConfig); err != nil {
+				t.Error(err)
+			}
+			stageRowsData = append(stageRowsData, RowData{
+				FileName:        row.FileName,
+				DoclingConfig:   doclingConfig,
+				MarkDownContent: row.MarkDownContent,
+			})
+		}
+
+		t.Logf("len of stage rows: %d", len(stageRows))
+
+		// now iterate over the rows and for each row iterate over stage rows haiving same file name, check if docling config is updated or not
+		for _, row := range rowsData {
+			for _, stageRow := range stageRowsData {
+				if row.FileName == stageRow.FileName {
+					if reflect.DeepEqual(row.DoclingConfig, stageRow.DoclingConfig) {
+						t.Errorf("docling config is not updated for the file: %s", row.FileName)
+					} else {
+						t.Logf("docling config is updated for the file: %s", row.FileName)
+					}
+				}
+			}
+		}
+
+		t.Log("Successfully verified the updation of docling config for the files in the stage")
 
 		return ctx
 	})
 
-	feature.Assess("Will change chunking config and verify pipeline reconciles successfully", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+	feature.Assess("Will change chunking config and verify the updation of files in the stage", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+		type data struct {
+			FileName       string `db:"file_name"`
+			ChunkingConfig string `db:"chunking_config"`
+		}
+
+		type RowData struct {
+			FileName       string                         `db:"file_name"`
+			ChunkingConfig v1alpha1.ChunksGeneratorConfig `db:"chunking_config"`
+		}
+
+		rows := []data{}
+			t.Error(err)
+		}
+
+		rowsData := []RowData{}
+		for _, row := range rows {
+			chunkingConfig := v1alpha1.ChunksGeneratorConfig{}
+			if err := json.Unmarshal([]byte(row.ChunkingConfig), &chunkingConfig); err != nil {
+				t.Error(err)
+			}
+			rowsData = append(rowsData, RowData{
+				FileName:       row.FileName,
+				ChunkingConfig: chunkingConfig,
+			})
+		}
+
+		t.Logf("len of rows: %d", len(rows))
+
 		// update the chunking config for the data product
 		t.Log("Updating the chunking config for the data product")
 		chunkingConfig := &v1alpha1.ChunksGeneratorConfig{
@@ -461,7 +616,7 @@ func TestUnstructuredDataLoad(t *testing.T) {
 
 		// fetch the latest version of the unstructured data pipeline CR
 		unstructuredDataPipelineCR := &v1alpha1.UnstructuredDataPipeline{}
-		if err := kubeClient.Resources().Get(ctx, dataProductCRName, testNamespace, unstructuredDataPipelineCR); err != nil {
+		if err := kubeClient.Resources().Get(ctx, dataPipelineCRName, testNamespace, unstructuredDataPipelineCR); err != nil {
 			t.Error(err)
 		}
 		unstructuredDataPipelineCR.Spec.ChunksGeneratorConfig = *chunkingConfig
@@ -471,34 +626,67 @@ func TestUnstructuredDataLoad(t *testing.T) {
 		t.Log("Successfully updated the chunking config in the unstructured data pipeline CR")
 
 		// wait until the unstructured data pipeline CR is ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
+		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataPipelineCRName, testNamespace); err != nil {
 			t.Error(err)
 		}
 		t.Log("UnstructuredDataPipeline successfully reconciled")
 
 		// wait for the document processor to be ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.DocumentProcessorCondition, "documentprocessors.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
+		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.DocumentProcessorCondition, "documentprocessors.operator.dataverse.redhat.com", dataPipelineCRName, testNamespace); err != nil {
 			t.Error(err)
 		}
 		t.Log("DocumentProcessor successfully reconciled")
 
 		// wait for the chunks generator to be ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.ChunksGeneratorCondition, "chunksgenerators.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
+		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.ChunksGeneratorCondition, "chunksgenerators.operator.dataverse.redhat.com", dataPipelineCRName, testNamespace); err != nil {
 			t.Error(err)
 		}
 		t.Log("ChunksGenerator successfully reconciled")
 
 		// wait for the vector embeddings generator to be ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.VectorEmbeddingGenerationConditionType, "vectorembeddingsgenerators.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
+		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.VectorEmbeddingGenerationConditionType, "vectorembeddingsgenerators.operator.dataverse.redhat.com", dataPipelineCRName, testNamespace); err != nil {
 			t.Error(err)
 		}
 		t.Log("VectorEmbeddingsGenerator successfully reconciled")
 
 		// now fetch unstructured data pipeline CR and wait until it is ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
+		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataPipelineCRName, testNamespace); err != nil {
 			t.Error(err)
 		}
-		t.Log("UnstructuredDataPipeline successfully reconciled after chunking config update")
+		t.Log("UnstructuredDataPipeline successfully reconciled, now files are up to date in the internal stage")
+
+		stageRows := []data{}
+			t.Error(err)
+		}
+
+		stageRowsData := []RowData{}
+		for _, row := range stageRows {
+			chunkingConfig := v1alpha1.ChunksGeneratorConfig{}
+			if err := json.Unmarshal([]byte(row.ChunkingConfig), &chunkingConfig); err != nil {
+				t.Error(err)
+			}
+			stageRowsData = append(stageRowsData, RowData{
+				FileName:       row.FileName,
+				ChunkingConfig: chunkingConfig,
+			})
+		}
+
+		t.Logf("len of stage rows: %d", len(stageRows))
+
+		// now iterate over files and check if chunking config is updated or not
+		for _, row := range rowsData {
+			for _, stageRow := range stageRowsData {
+				if row.FileName == stageRow.FileName {
+					if reflect.DeepEqual(row.ChunkingConfig, stageRow.ChunkingConfig) {
+						t.Errorf("chunking config is not updated for the file: %s", row.FileName)
+					} else {
+						t.Logf("chunking config is updated for the file: %s", row.FileName)
+					}
+				}
+			}
+		}
+
+		t.Log("Successfully verified the updation of chunking config for the files in the stage")
 
 		return ctx
 	})
@@ -519,7 +707,7 @@ func TestUnstructuredDataLoad(t *testing.T) {
 			// delete unstructured data pipeline CR
 			unstructuredDataPipeline := &v1alpha1.UnstructuredDataPipeline{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dataProductCRName,
+					Name:      dataPipelineCRName,
 					Namespace: testNamespace,
 				},
 			}

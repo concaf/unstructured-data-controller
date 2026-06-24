@@ -6,4 +6,9 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: vectorembeddingsgenerator-sample
 spec:
-# TODO(user): Add fields here
+  stageName: embed
+  dependsOn:
+    - name: chunk
+      type: ChunksGenerator
+  embeddingGeneratorConfig:
+    modelName: nomic-ai/nomic-embed-text-v1.5

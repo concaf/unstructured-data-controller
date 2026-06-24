@@ -6,8 +6,9 @@ resources:
 - bases/operator.dataverse.redhat.com_unstructureddatapipelines.yaml
 - bases/operator.dataverse.redhat.com_documentprocessors.yaml
 - bases/operator.dataverse.redhat.com_chunksgenerators.yaml
-- bases/operator.dataverse.redhat.com_sqsinformers.yaml
 - bases/operator.dataverse.redhat.com_vectorembeddingsgenerators.yaml
+- bases/operator.dataverse.redhat.com_sourcecrawlers.yaml
+- bases/operator.dataverse.redhat.com_destinationsyncers.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

@@ -4,27 +4,27 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: chunksgenerators.operator.dataverse.redhat.com
+  name: sourcecrawlers.operator.dataverse.redhat.com
 spec:
   group: operator.dataverse.redhat.com
   names:
-    kind: ChunksGenerator
-    listKind: ChunksGeneratorList
-    plural: chunksgenerators
-    singular: chunksgenerator
+    kind: SourceCrawler
+    listKind: SourceCrawlerList
+    plural: sourcecrawlers
+    singular: sourcecrawler
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.conditions[?(@.type=="ChunksGeneratorReady")].status
+    - jsonPath: .status.conditions[?(@.type=="SourceCrawlerReady")].status
       name: Status
       type: string
-    - jsonPath: .status.conditions[?(@.type=="ChunksGeneratorReady")].message
+    - jsonPath: .status.conditions[?(@.type=="SourceCrawlerReady")].message
       name: Message
       type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ChunksGenerator is the Schema for the chunksgenerators API
+        description: SourceCrawler is the Schema for the sourcecrawlers API.
         properties:
           apiVersion:
             description: |-
@@ -44,62 +44,8 @@ spec:
           metadata:
             type: object
           spec:
-            description: ChunksGeneratorSpec defines the desired state of ChunksGenerator
+            description: SourceCrawlerSpec defines the desired state of SourceCrawler.
             properties:
-              config:
-                properties:
-                  markdownSplitterConfig:
-                    properties:
-                      chunkOverlap:
-                        type: integer
-                      chunkSize:
-                        type: integer
-                      codeBlocks:
-                        type: boolean
-                      headingHierarchy:
-                        type: boolean
-                      joinTableRows:
-                        type: boolean
-                      referenceLinks:
-                        type: boolean
-                    type: object
-                  recursiveCharacterSplitterConfig:
-                    properties:
-                      chunkOverlap:
-                        type: integer
-                      chunkSize:
-                        type: integer
-                      keepSeparator:
-                        type: boolean
-                      separators:
-                        items:
-                          type: string
-                        type: array
-                    type: object
-                  strategy:
-                    type: string
-                  tokenSplitterConfig:
-                    properties:
-                      allowedSpecial:
-                        items:
-                          type: string
-                        type: array
-                      chunkOverlap:
-                        type: integer
-                      chunkSize:
-                        type: integer
-                      disallowedSpecial:
-                        items:
-                          type: string
-                        type: array
-                      encodingName:
-                        type: string
-                      modelName:
-                        type: string
-                    type: object
-                required:
-                - strategy
-                type: object
               dependsOn:
                 items:
                   description: StageDependency identifies an upstream stage by name
@@ -122,11 +68,32 @@ spec:
                   - type
                   type: object
                 type: array
+              secretRef:
+                type: string
+              sourceCrawlerConfig:
+                description: SourceCrawlerConfig configures where to read unstructured
+                  data from.
+                properties:
+                  s3Config:
+                    description: S3Config configures an S3 bucket and optional prefix.
+                    properties:
+                      bucket:
+                        type: string
+                      prefix:
+                        type: string
+                      sqsQueueURL:
+                        type: string
+                    required:
+                    - bucket
+                    type: object
+                  type:
+                    type: string
+                type: object
               stageName:
                 type: string
             type: object
           status:
-            description: ChunksGeneratorStatus defines the observed state of ChunksGenerator
+            description: SourceCrawlerStatus defines the observed state of SourceCrawler.
             properties:
               conditions:
                 items:
