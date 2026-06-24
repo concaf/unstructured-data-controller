@@ -46,27 +46,6 @@ spec:
           spec:
             description: ControllerConfigSpec defines the desired state of ControllerConfig.
             properties:
-              snowflakeConfig:
-                properties:
-                  account:
-                    type: string
-                  name:
-                    type: string
-                  region:
-                    type: string
-                  role:
-                    type: string
-                  user:
-                    type: string
-                  warehouse:
-                    type: string
-                required:
-                - account
-                - name
-                - role
-                - user
-                - warehouse
-                type: object
               unstructuredDataProcessingConfig:
                 properties:
                   cacheDirectory:

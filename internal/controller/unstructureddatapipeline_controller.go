@@ -34,7 +34,6 @@ import (
 	"github.com/redhat-data-and-ai/unstructured-data-controller/internal/controller/controllerutils"
 	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/awsclienthandler"
 	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/filestore"
-	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/snowflake"
 	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/unstructured"
 )
 
@@ -52,7 +51,6 @@ type UnstructuredDataPipelineReconciler struct {
 	client.Client
 	Scheme    *runtime.Scheme
 	fileStore *filestore.FileStore
-	sf        *snowflake.Client
 }
 
 // +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=unstructureddatapipelines,verbs=get;list;watch;create;update;patch;delete
@@ -246,12 +244,6 @@ func (r *UnstructuredDataPipelineReconciler) Reconcile(ctx context.Context, req 
 	// Setup destination
 	var destination unstructured.Destination
 	switch unstructuredDataPipelineCR.Spec.DestinationConfig.Type {
-	case operatorv1alpha1.DestinationTypeInternalStage:
-		var err error
-		destination, err = r.setupSnowflakeDestination(ctx, unstructuredDataPipelineCR)
-		if err != nil {
-			return r.handleError(ctx, unstructuredDataPipelineCR, err)
-		}
 	case operatorv1alpha1.TypeS3:
 		var err error
 		destination, err = setupS3Destination(unstructuredDataPipelineCR, dataProductName)
@@ -300,24 +292,6 @@ func (r *UnstructuredDataPipelineReconciler) Reconcile(ctx context.Context, req 
 		ctrlResult.RequeueAfter = time.Duration(*UnstructuredDataPipelineResyncInterval) * time.Minute
 	}
 	return ctrlResult, nil
-}
-
-// setupSnowflakeDestination returns a Snowflake internal stage destination for the given CR.
-func (r *UnstructuredDataPipelineReconciler) setupSnowflakeDestination(ctx context.Context, unstructuredDataPipelineCR *operatorv1alpha1.UnstructuredDataPipeline) (unstructured.Destination, error) {
-	logger := log.FromContext(ctx)
-	sf, err := snowflake.GetClient(ctx)
-	if err != nil {
-		logger.Error(err, "failed to get snowflake client")
-		return nil, err
-	}
-	r.sf = sf
-	return &unstructured.SnowflakeInternalStage{
-		Client:   sf,
-		Role:     sf.GetRole(),
-		Stage:    unstructuredDataPipelineCR.Spec.DestinationConfig.SnowflakeInternalStageConfig.Stage,
-		Database: unstructuredDataPipelineCR.Spec.DestinationConfig.SnowflakeInternalStageConfig.Database,
-		Schema:   unstructuredDataPipelineCR.Spec.DestinationConfig.SnowflakeInternalStageConfig.Schema,
-	}, nil
 }
 
 // setupS3Destination returns an S3 destination for the given CR

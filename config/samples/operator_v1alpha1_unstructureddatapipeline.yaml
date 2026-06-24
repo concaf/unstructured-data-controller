@@ -45,12 +45,7 @@ spec:
     nomicEmbedTextV15Config:
       encodingformat: "float"
   destinationConfig:
-    type: "snowflakeInternalStage"
-    snowflakeInternalStageConfig:
-      database: "TESTING_DB"
-      schema: "TESTINGSCHEMA2"
-      stage: "TESTINGSCHEMA_INTERNAL_STG"
-      # type: "s3"
-      # s3DestinationConfig:
-      #   bucket: output-chunks-bucket
-      #   prefix: testunstructureddataproduct
+    type: "s3"
+    s3DestinationConfig:
+      bucket: output-chunks-bucket
+      prefix: testunstructureddataproduct

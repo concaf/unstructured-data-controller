@@ -18,15 +18,12 @@ package controller
 
 import (
 	"context"
-	"crypto/rsa"
-	"encoding/base64"
 	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/util/keyutil"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -37,8 +34,6 @@ import (
 	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/awsclienthandler"
 	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/docling"
 	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/langchain"
-	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/snowflake"
-	"github.com/snowflakedb/gosnowflake"
 )
 
 var (
@@ -185,50 +180,6 @@ func (r *ControllerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, err
 	}
 	logger.Info("File store S3 client created ...")
-
-	snowflakePrivateKey := unstructuredSecret.Data["SNOWFLAKE_PRIVATE_KEY"]
-	snowflakeConfig := config.Spec.SnowflakeConfig
-	if len(snowflakePrivateKey) != 0 && snowflakeConfig != nil {
-		encodedString, err := base64.StdEncoding.DecodeString(string(snowflakePrivateKey))
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to decode snowflake private key from secret %s: %w", unstructuredSecret.Name, err)
-		}
-		privateKeyInterface, err := keyutil.ParsePrivateKeyPEM(encodedString)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to parse snowflake private key from secret %s: %w", unstructuredSecret.Name, err)
-		}
-		privateKey, ok := privateKeyInterface.(*rsa.PrivateKey)
-		if !ok {
-			return ctrl.Result{}, fmt.Errorf("snowflake private key in secret %s is not an RSA private key", unstructuredSecret.Name)
-		}
-
-		// Get the snowflake client config from the ControllerConfig CR
-		snowflakeConfig := config.Spec.SnowflakeConfig
-		snowflakeClientConfig := gosnowflake.Config{
-			Account:          snowflakeConfig.Account,
-			User:             snowflakeConfig.User,
-			Role:             snowflakeConfig.Role,
-			Region:           snowflakeConfig.Region,
-			Warehouse:        snowflakeConfig.Warehouse,
-			KeepSessionAlive: true,
-			Authenticator:    gosnowflake.AuthTypeJwt,
-			PrivateKey:       privateKey,
-		}
-
-		logger.Info("creating snowflake client and validating if snowflake connection is healthy for " + snowflakeConfig.Name)
-		snowflake.SfConfig = &snowflake.ClientConfig{
-			Config: snowflakeClientConfig,
-		}
-		logger.Info("creating snowflake client")
-		if _, err := snowflake.GetClient(ctx); err != nil {
-			logger.Error(err, "failed to ping snowflake for "+snowflakeConfig.Name+". re-attempting to ping snowflake in 10 seconds")
-			config.UpdateStatus(err)
-			if updateErr := r.Status().Update(ctx, &config); updateErr != nil {
-				return ctrl.Result{}, updateErr
-			}
-			return ctrl.Result{}, err
-		}
-	}
 
 	// set the value of resync interval
 	if config.Spec.UnstructuredDataProcessingConfig.UnstructuredDataPipelineResyncInterval != nil {

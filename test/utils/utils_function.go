@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"os"
 
 	"github.com/redhat-data-and-ai/unstructured-data-controller/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,40 +26,12 @@ func RandomStringGenerator(length int) string {
 }
 
 func GetControllerConfigResource() *v1alpha1.ControllerConfig {
-	account := os.Getenv("SNOWFLAKE_ACCOUNT")
-	if account == "" {
-		account = "account-identifier"
-	}
-
-	user := os.Getenv("SNOWFLAKE_USER")
-	if user == "" {
-		user = "username"
-	}
-
-	role := os.Getenv("SNOWFLAKE_ROLE")
-	if role == "" {
-		role = "TESTING_ROLE"
-	}
-
-	warehouse := os.Getenv("SNOWFLAKE_WAREHOUSE")
-	if warehouse == "" {
-		warehouse = "DEFAULT"
-	}
-
 	return &v1alpha1.ControllerConfig{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "controllerconfig",
 			Namespace: DefaultE2ENamespace,
 		},
 		Spec: v1alpha1.ControllerConfigSpec{
-			SnowflakeConfig: &v1alpha1.SnowflakeConfig{
-				Name:      "e2e",
-				Account:   account,
-				User:      user,
-				Role:      role,
-				Region:    "us-west-2",
-				Warehouse: warehouse,
-			},
 			UnstructuredDataProcessingConfig: v1alpha1.UnstructuredDataProcessingConfigSpec{
 				DoclingServeURL:             "http://docling-serve:5001",
 				IngestionBucket:             "unstructured-bucket",
@@ -74,16 +45,13 @@ func GetControllerConfigResource() *v1alpha1.ControllerConfig {
 	}
 }
 
-// GetUnstructuredDataPipelineResourceWithStage creates an UnstructuredDataPipeline CR for e2e tests
-func GetUnstructuredDataPipelineResourceWithStage(name, namespace, stageName string) v1alpha1.UnstructuredDataPipeline {
+// GetUnstructuredDataPipelineResource creates an UnstructuredDataPipeline CR for e2e tests
+func GetUnstructuredDataPipelineResource(name, namespace string) v1alpha1.UnstructuredDataPipeline {
 	if name == "" {
 		name = "unstructured"
 	}
 	if namespace == "" {
 		namespace = DefaultE2ENamespace
-	}
-	if stageName == "" {
-		stageName = "unstructured_internal_stg"
 	}
 	return v1alpha1.UnstructuredDataPipeline{
 		ObjectMeta: metav1.ObjectMeta{
@@ -103,11 +71,10 @@ func GetUnstructuredDataPipelineResourceWithStage(name, namespace, stageName str
 				},
 			},
 			DestinationConfig: v1alpha1.DestinationConfig{
-				Type: v1alpha1.DestinationTypeInternalStage,
-				SnowflakeInternalStageConfig: v1alpha1.SnowflakeInternalStageConfig{
-					Database: "unstructured_db",
-					Schema:   "unstructured",
-					Stage:    stageName,
+				Type: v1alpha1.TypeS3,
+				S3DestinationConfig: v1alpha1.S3Config{
+					Bucket: "output-chunks-bucket",
+					Prefix: "unstructured",
 				},
 			},
 			DocumentProcessorConfig: v1alpha1.DocumentProcessorConfig{

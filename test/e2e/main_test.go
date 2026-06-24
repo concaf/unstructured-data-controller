@@ -287,7 +287,7 @@ func testSetup(ctx context.Context, runningProcesses *[]exec.Cmd, config *envcon
 
 	skipConfigReady := os.Getenv("SKIP_CONTROLLER_CONFIG_READY")
 	if skipConfigReady == "true" {
-		log.Println("SKIP_CONTROLLER_CONFIG_READY=true: skipping wait for ConfigReady (e.g. CI without Snowflake secret)")
+		log.Println("SKIP_CONTROLLER_CONFIG_READY=true: skipping wait for ConfigReady")
 		return nil
 	}
 	log.Println("Waiting for ControllerConfig to be healthy (ConfigReady=true)...")
