@@ -89,13 +89,8 @@ func (r *UnstructuredDataPipelineReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		latest := &operatorv1alpha1.UnstructuredDataPipeline{}
-		if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
-			return err
-		}
-		latest.SetWaiting()
-		return r.Status().Update(ctx, latest)
+	if err := controllerutils.StatusPatch(ctx, r.Client, unstructuredDataPipelineCR, func() {
+		unstructuredDataPipelineCR.SetWaiting()
 	}); err != nil {
 		logger.Error(err, "failed to update UnstructuredDataPipeline CR status")
 		return ctrl.Result{}, err
@@ -279,10 +274,10 @@ func (r *UnstructuredDataPipelineReconciler) Reconcile(ctx context.Context, req 
 
 	// all done, let's update the status to ready
 	successMessage := fmt.Sprintf("successfully reconciled unstructured data product: %s", dataProductName)
-	if err := controllerutils.StatusUpdateWithRetry(ctx, r.Client, unstructuredDataPipelineKey, func() client.Object { return &operatorv1alpha1.UnstructuredDataPipeline{} }, func(obj client.Object) {
-		obj.(*operatorv1alpha1.UnstructuredDataPipeline).UpdateStatus(successMessage, nil)
+	if err := controllerutils.StatusPatch(ctx, r.Client, unstructuredDataPipelineCR, func() {
+		unstructuredDataPipelineCR.UpdateStatus(successMessage, nil)
 	}); err != nil {
-		logger.Error(err, "failed to update UnstructuredDataPipeline CR status", "namespace", unstructuredDataPipelineKey.Namespace, "name", unstructuredDataPipelineKey.Name)
+		logger.Error(err, "failed to update UnstructuredDataPipeline CR status", "namespace", unstructuredDataPipelineCR.Namespace, "name", unstructuredDataPipelineCR.Name)
 		return r.handleError(ctx, unstructuredDataPipelineCR, err)
 	}
 	logger.Info("successfully updated UnstructuredDataPipeline CR status", "status", unstructuredDataPipelineCR.Status)
@@ -322,12 +317,11 @@ func (r *UnstructuredDataPipelineReconciler) handleError(ctx context.Context, un
 	logger := log.FromContext(ctx)
 	logger.Error(err, "encountered error")
 	reconcileErr := err
-	unstructuredDataPipelineKey := client.ObjectKeyFromObject(unstructuredDataPipelineCR)
-	if updateErr := controllerutils.StatusUpdateWithRetry(ctx, r.Client, unstructuredDataPipelineKey, func() client.Object { return &operatorv1alpha1.UnstructuredDataPipeline{} }, func(obj client.Object) {
-		obj.(*operatorv1alpha1.UnstructuredDataPipeline).UpdateStatus("", reconcileErr)
+	if updateErr := controllerutils.StatusPatch(ctx, r.Client, unstructuredDataPipelineCR, func() {
+		unstructuredDataPipelineCR.UpdateStatus("", reconcileErr)
 	}); updateErr != nil {
 		logger.Error(updateErr, "failed to update UnstructuredDataPipeline CR status")
 		return ctrl.Result{}, updateErr
 	}
-	return ctrl.Result{}, err
+	return ctrl.Result{}, reconcileErr
 }

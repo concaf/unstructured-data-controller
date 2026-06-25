@@ -176,8 +176,8 @@ func (r *SQSInformerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	sqsInformerKey := client.ObjectKeyFromObject(sqsInformerCR)
-	if err := controllerutils.StatusUpdateWithRetry(ctx, r.Client, sqsInformerKey, func() client.Object { return &operatorv1alpha1.SQSInformer{} }, func(obj client.Object) {
-		obj.(*operatorv1alpha1.SQSInformer).SetWaiting()
+	if err := controllerutils.StatusPatch(ctx, r.Client, sqsInformerCR, func() {
+		sqsInformerCR.SetWaiting()
 	}); err != nil {
 		logger.Error(err, "failed to update SQSInformer status")
 		return ctrl.Result{}, err
@@ -228,8 +228,8 @@ func (r *SQSInformerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	logger.Info("successfully processed all messages, will check again ...")
 	successMessage := "successfully processed all messages, will check again ..."
-	if err := controllerutils.StatusUpdateWithRetry(ctx, r.Client, sqsInformerKey, func() client.Object { return &operatorv1alpha1.SQSInformer{} }, func(obj client.Object) {
-		obj.(*operatorv1alpha1.SQSInformer).UpdateStatus(successMessage, nil)
+	if err := controllerutils.StatusPatch(ctx, r.Client, sqsInformerCR, func() {
+		sqsInformerCR.UpdateStatus(successMessage, nil)
 	}); err != nil {
 		logger.Error(err, "failed to update SQSInformer status")
 		return ctrl.Result{}, err
@@ -305,9 +305,8 @@ func (r *SQSInformerReconciler) handleError(ctx context.Context, sqsInformerCR *
 	logger := log.FromContext(ctx)
 	logger.Error(err, "encountered error")
 	reconcileErr := err
-	sqsInformerKey := client.ObjectKeyFromObject(sqsInformerCR)
-	if updateErr := controllerutils.StatusUpdateWithRetry(ctx, r.Client, sqsInformerKey, func() client.Object { return &operatorv1alpha1.SQSInformer{} }, func(obj client.Object) {
-		obj.(*operatorv1alpha1.SQSInformer).UpdateStatus("", reconcileErr)
+	if updateErr := controllerutils.StatusPatch(ctx, r.Client, sqsInformerCR, func() {
+		sqsInformerCR.UpdateStatus("", reconcileErr)
 	}); updateErr != nil {
 		logger.Error(updateErr, "failed to update SQSInformer status")
 		return ctrl.Result{}, updateErr

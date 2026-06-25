@@ -18,23 +18,21 @@ package controllerutils
 
 import (
 	"context"
+	"errors"
 
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// StatusUpdateWithRetry runs Get -> mutate -> Status().Update with RetryOnConflict.
-// newEmpty must return a new zero value of the object type (e.g. func() client.Object { return &ChunksGenerator{} }).
-// mutate is called with the fetched object so the caller can set status (e.g. SetWaiting(), UpdateStatus(msg, err)).
-func StatusUpdateWithRetry(ctx context.Context, c client.Client, key client.ObjectKey, newEmpty func() client.Object, mutate func(client.Object)) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		obj := newEmpty()
-		if err := c.Get(ctx, key, obj); err != nil {
-			return err
-		}
-		mutate(obj)
-		return c.Status().Update(ctx, obj)
-	})
+// StatusPatch snapshots the object, applies mutate, and patches only the status
+// diff via merge-patch. No re-fetch or conflict retry needed.
+func StatusPatch(ctx context.Context, c client.Client, obj client.Object, mutate func()) error {
+	base, ok := obj.DeepCopyObject().(client.Object)
+	if !ok {
+		return errors.New("DeepCopyObject did not return a client.Object")
+	}
+	mutate()
+	return c.Status().Patch(ctx, obj, client.MergeFrom(base))
 }
 
 // RemoveForceReconcileLabelWithRetry gets the latest object, removes the force-reconcile label, and updates with retry.

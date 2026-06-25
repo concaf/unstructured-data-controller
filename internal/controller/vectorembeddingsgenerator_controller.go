@@ -78,13 +78,8 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 	}
 
 	// set status to waiting
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		latest := &operatorv1alpha1.VectorEmbeddingsGenerator{}
-		if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
-			return err
-		}
-		latest.SetWaiting()
-		return r.Status().Update(ctx, latest)
+	if err := controllerutils.StatusPatch(ctx, r.Client, vectorEmbeddingsGeneratorCR, func() {
+		vectorEmbeddingsGeneratorCR.SetWaiting()
 	}); err != nil {
 		logger.Error(err, "failed to update VectorEmbeddingsGenerator CR status")
 		return ctrl.Result{}, err
@@ -165,16 +160,10 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 
 	// all done, let's update the status to ready
 	successMessage := fmt.Sprintf("successfully reconciled vector embeddings generator: %s", vectorEmbeddingsGeneratorCR.Name)
-	vectorEmbeddingsGeneratorKey := client.ObjectKeyFromObject(vectorEmbeddingsGeneratorCR)
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		res := &operatorv1alpha1.VectorEmbeddingsGenerator{}
-		if err := r.Get(ctx, vectorEmbeddingsGeneratorKey, res); err != nil {
-			return err
-		}
-		res.UpdateStatus(successMessage, nil)
-		return r.Status().Update(ctx, res)
+	if err := controllerutils.StatusPatch(ctx, r.Client, vectorEmbeddingsGeneratorCR, func() {
+		vectorEmbeddingsGeneratorCR.UpdateStatus(successMessage, nil)
 	}); err != nil {
-		logger.Error(err, "failed to update VectorEmbeddingsGenerator CR status", "namespace", vectorEmbeddingsGeneratorKey.Namespace, "name", vectorEmbeddingsGeneratorKey.Name)
+		logger.Error(err, "failed to update VectorEmbeddingsGenerator CR status", "namespace", vectorEmbeddingsGeneratorCR.Namespace, "name", vectorEmbeddingsGeneratorCR.Name)
 		return r.handleError(ctx, vectorEmbeddingsGeneratorCR, err)
 	}
 	logger.Info("successfully updated VectorEmbeddingsGenerator CR status", "status", vectorEmbeddingsGeneratorCR.Status)
@@ -383,17 +372,11 @@ func (r *VectorEmbeddingsGeneratorReconciler) handleError(ctx context.Context, v
 	logger := log.FromContext(ctx)
 	logger.Error(err, "encountered error")
 	reconcileErr := err
-	key := client.ObjectKeyFromObject(vectorEmbeddingsGeneratorCR)
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		latest := &operatorv1alpha1.VectorEmbeddingsGenerator{}
-		if getErr := r.Get(ctx, key, latest); getErr != nil {
-			return getErr
-		}
-		latest.UpdateStatus("", reconcileErr)
-		return r.Status().Update(ctx, latest)
-	}); err != nil {
-		logger.Error(err, "failed to update VectorEmbeddingsGenerator CR status")
-		return ctrl.Result{}, err
+	if updateErr := controllerutils.StatusPatch(ctx, r.Client, vectorEmbeddingsGeneratorCR, func() {
+		vectorEmbeddingsGeneratorCR.UpdateStatus("", reconcileErr)
+	}); updateErr != nil {
+		logger.Error(updateErr, "failed to update VectorEmbeddingsGenerator CR status")
+		return ctrl.Result{}, updateErr
 	}
 	return ctrl.Result{}, reconcileErr
 }

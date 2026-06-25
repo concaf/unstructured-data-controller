@@ -92,13 +92,8 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	// set status to waiting
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		latest := &operatorv1alpha1.DocumentProcessor{}
-		if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
-			return err
-		}
-		latest.SetWaiting()
-		return r.Status().Update(ctx, latest)
+	if err := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
+		documentProcessorCR.SetWaiting()
 	}); err != nil {
 		logger.Error(err, "failed to update DocumentProcessor CR status")
 		return ctrl.Result{}, err
@@ -171,13 +166,7 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return r.handleError(ctx, documentProcessorCR, errors.New("failed to process jobs or documents"))
 	}
 
-	latestDocumentProcessorCR := &operatorv1alpha1.DocumentProcessor{}
-	if err := r.Get(ctx, req.NamespacedName, latestDocumentProcessorCR); err != nil {
-		logger.Error(err, "failed to get DocumentProcessor CR")
-		return ctrl.Result{}, err
-	}
-
-	if len(latestDocumentProcessorCR.Status.Jobs) > 0 {
+	if len(documentProcessorCR.Status.Jobs) > 0 {
 		logger.Info("some jobs are still pending or running, will requeue after a bit ...")
 		return ctrl.Result{
 			RequeueAfter: requeueAfter,
@@ -186,19 +175,14 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	logger.Info("all jobs are completed, no need to requeue")
 
-	successMessage := fmt.Sprintf("successfully reconciled document processor: %s", latestDocumentProcessorCR.Name)
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		res := &operatorv1alpha1.DocumentProcessor{}
-		if err := r.Get(ctx, documentProcessorKey, res); err != nil {
-			return err
-		}
-		res.UpdateStatus(successMessage, nil)
-		return r.Status().Update(ctx, res)
+	successMessage := fmt.Sprintf("successfully reconciled document processor: %s", documentProcessorCR.Name)
+	if err := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
+		documentProcessorCR.UpdateStatus(successMessage, nil)
 	}); err != nil {
-		logger.Error(err, "failed to update DocumentProcessor CR status", "namespace", latestDocumentProcessorCR.Namespace, "name", latestDocumentProcessorCR.Name)
+		logger.Error(err, "failed to update DocumentProcessor CR status", "namespace", documentProcessorCR.Namespace, "name", documentProcessorCR.Name)
 		return r.handleError(ctx, documentProcessorCR, err)
 	}
-	logger.Info("successfully updated DocumentProcessor CR status", "status", latestDocumentProcessorCR.Status)
+	logger.Info("successfully updated DocumentProcessor CR status", "status", documentProcessorCR.Status)
 
 	return ctrl.Result{}, nil
 }
@@ -211,14 +195,8 @@ func (r *DocumentProcessorReconciler) reconcileJob(ctx context.Context, job oper
 			logger.Info("recovered from panic in processJob, likely stale job from previous session", "panic", panicErr, "taskID", job.TaskID, "filePath", job.FilePath)
 			if panicMessage, ok := panicErr.(string); ok && strings.Contains(panicMessage, docling.SemaphorePanicError) {
 				logger.Info("semaphore panic detected, removing stale job", "taskID", job.TaskID)
-				documentProcessorKey := client.ObjectKeyFromObject(documentProcessorCR)
-				if updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-					latest := &operatorv1alpha1.DocumentProcessor{}
-					if getErr := r.Get(ctx, documentProcessorKey, latest); getErr != nil {
-						return getErr
-					}
-					latest.DeleteJobByFilePath(job.FilePath)
-					return r.Status().Update(ctx, latest)
+				if updateErr := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
+					documentProcessorCR.DeleteJobByFilePath(job.FilePath)
 				}); updateErr != nil {
 					logger.Error(updateErr, "failed to delete stale job after panic", "filePath", job.FilePath)
 					err = updateErr
@@ -269,14 +247,8 @@ func (r *DocumentProcessorReconciler) reconcileJob(ctx context.Context, job oper
 		logger.Info("successfully stored the converted file in the filestore", "filePath", convertedFilePath)
 
 		// remove the job from the status as nothing needs to be done for this job
-		documentProcessorKey := client.ObjectKeyFromObject(documentProcessorCR)
-		if updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			latest := &operatorv1alpha1.DocumentProcessor{}
-			if getErr := r.Get(ctx, documentProcessorKey, latest); getErr != nil {
-				return getErr
-			}
-			latest.DeleteJobByFilePath(job.FilePath)
-			return r.Status().Update(ctx, latest)
+		if updateErr := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
+			documentProcessorCR.DeleteJobByFilePath(job.FilePath)
 		}); updateErr != nil {
 			logger.Error(updateErr, "failed to delete job from status as it has completed successfully", "filePath", job.FilePath)
 			return updateErr
@@ -288,15 +260,9 @@ func (r *DocumentProcessorReconciler) reconcileJob(ctx context.Context, job oper
 		// if the attempts > max attempts, remove the job from the status
 		if job.Attempts >= maxDoclingConversionAttempts {
 			logger.Error(fmt.Errorf("failed to convert file, max attempts reached for file: %s", job.FilePath), "failed to convert file, max attempts reached")
-			documentProcessorKey := client.ObjectKeyFromObject(documentProcessorCR)
-			if updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-				latest := &operatorv1alpha1.DocumentProcessor{}
-				if getErr := r.Get(ctx, documentProcessorKey, latest); getErr != nil {
-					return getErr
-				}
-				latest.AddPermanentlyFailingFile(job.FilePath)
-				latest.DeleteJobByFilePath(job.FilePath)
-				return r.Status().Update(ctx, latest)
+			if updateErr := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
+				documentProcessorCR.AddPermanentlyFailingFile(job.FilePath)
+				documentProcessorCR.DeleteJobByFilePath(job.FilePath)
 			}); updateErr != nil {
 				logger.Error(updateErr, "failed to delete job from status as it has failed or skipped", "filePath", job.FilePath)
 				return updateErr
@@ -363,23 +329,17 @@ func (r *DocumentProcessorReconciler) processDocument(ctx context.Context, rawFi
 		conversionAttempt = job.Attempts + 1
 	}
 
-	documentProcessorKey := client.ObjectKey{Namespace: documentProcessorCR.Namespace, Name: documentProcessorCR.Name}
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		latest := &operatorv1alpha1.DocumentProcessor{}
-		if getErr := r.Get(ctx, documentProcessorKey, latest); getErr != nil {
-			return getErr
-		}
-		latest.AddOrUpdateJob(operatorv1alpha1.Job{
+	if err := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
+		documentProcessorCR.AddOrUpdateJob(operatorv1alpha1.Job{
 			FilePath:          rawFilePath,
 			FileIdentifier:    fileUID,
 			DocumentConverter: string(unstructured.DocumentConverterDocling),
-			DoclingConfig:     latest.Spec.DocumentProcessorConfig.DoclingConfig,
+			DoclingConfig:     documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig,
 			TaskID:            response.TaskID,
 			Status:            response.TaskStatus,
 			CreatedOn:         time.Now().Format(time.RFC3339),
 			Attempts:          conversionAttempt,
 		})
-		return r.Status().Update(ctx, latest)
 	}); err != nil {
 		logger.Error(err, "failed to update DocumentProcessor CR status")
 		return err
@@ -495,14 +455,8 @@ func (r *DocumentProcessorReconciler) needsConversion(ctx context.Context, rawFi
 		// if the current job is not valid (different configuration), then it is of no use to us irrespective of the status
 		// we will delete the job from status and create a new job with the new configuration
 		logger.Info("job already exists, but with a different configuration, let's delete the current job from status", "filePath", rawFilePath)
-		documentProcessorKey := client.ObjectKeyFromObject(documentProcessorCR)
-		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			latest := &operatorv1alpha1.DocumentProcessor{}
-			if getErr := r.Get(ctx, documentProcessorKey, latest); getErr != nil {
-				return getErr
-			}
-			latest.DeleteJobByFilePath(rawFilePath)
-			return r.Status().Update(ctx, latest)
+		if err := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
+			documentProcessorCR.DeleteJobByFilePath(rawFilePath)
 		}); err != nil {
 			logger.Error(err, "failed to update DocumentProcessor CR status")
 			return false, err
@@ -546,17 +500,11 @@ func (r *DocumentProcessorReconciler) handleError(ctx context.Context, documentP
 	logger := log.FromContext(ctx)
 	logger.Error(err, "encountered error")
 	reconcileErr := err
-	documentProcessorKey := client.ObjectKeyFromObject(documentProcessorCR)
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		latest := &operatorv1alpha1.DocumentProcessor{}
-		if getErr := r.Get(ctx, documentProcessorKey, latest); getErr != nil {
-			return getErr
-		}
-		latest.UpdateStatus("", reconcileErr)
-		return r.Status().Update(ctx, latest)
-	}); err != nil {
-		logger.Error(err, "failed to update DocumentProcessor CR status")
-		return ctrl.Result{}, err
+	if updateErr := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
+		documentProcessorCR.UpdateStatus("", reconcileErr)
+	}); updateErr != nil {
+		logger.Error(updateErr, "failed to update DocumentProcessor CR status")
+		return ctrl.Result{}, updateErr
 	}
 	return ctrl.Result{}, reconcileErr
 }

@@ -194,8 +194,9 @@ func (r *ControllerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	// update the status of the Config CR to indicate that it is healthy
-	config.UpdateStatus(nil)
-	if err := r.Status().Update(ctx, &config); err != nil {
+	if err := controllerutils.StatusPatch(ctx, r.Client, &config, func() {
+		config.UpdateStatus(nil)
+	}); err != nil {
 		return ctrl.Result{}, err
 	}
 
