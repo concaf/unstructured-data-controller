@@ -192,12 +192,17 @@ func (r *VectorEmbeddingsGeneratorReconciler) processChunkedFile(ctx context.Con
 	var embeddingClient embedding.EmbeddingGenerator
 
 	vegConfig := vectorEmbeddingsGeneratorCR.Spec.VectorEmbeddingsGeneratorConfig
-	embeddingClient = embedding.NewHTTPClient(&embedding.HTTPClientConfig{
-		Endpoint:   embeddingEndpoint,
-		APIKey:     embeddingAPIKey,
-		AuthFormat: "Bearer",
-		ModelName:  vegConfig.ModelName,
-	})
+	switch vegConfig.ModelName {
+	case "nomic-ai/nomic-embed-text-v1.5":
+		embeddingClient = embedding.NewHTTPClient(&embedding.HTTPClientConfig{
+			Endpoint:   embeddingEndpoint,
+			APIKey:     embeddingAPIKey,
+			AuthFormat: "Bearer",
+			ModelName:  vegConfig.ModelName,
+		})
+	default:
+		return false, fmt.Errorf("unsupported embedding model: %s", vegConfig.ModelName)
+	}
 
 	logger.Info("generating embeddings for chunks", "file", chunksFilePath, "chunkCount", len(texts))
 
