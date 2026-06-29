@@ -28,7 +28,6 @@ type EmbeddingProvider string
 //	  stageName: embed
 //	  dependsOn:
 //	    - name: chunk
-//	      type: ChunksGenerator
 //	  embeddingGeneratorConfig:
 //	    modelName: nomic-embed-text-v1.5
 //	status:

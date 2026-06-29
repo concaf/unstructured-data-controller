@@ -63,7 +63,7 @@ func GetUnstructuredDataPipelineResourceWithStage(name, namespace string) v1alph
 				{
 					Name:      "convert",
 					Type:      v1alpha1.StageTypeDocumentProcessor,
-					DependsOn: []string{"crawl"},
+					DependsOn: []v1alpha1.StageDependency{{Name: "crawl"}},
 					DocumentProcessorConfig: &v1alpha1.DocumentProcessorConfig{
 						Type: "docling",
 						DoclingConfig: v1alpha1.DoclingConfig{
@@ -83,7 +83,7 @@ func GetUnstructuredDataPipelineResourceWithStage(name, namespace string) v1alph
 				{
 					Name:      "chunk",
 					Type:      v1alpha1.StageTypeChunksGenerator,
-					DependsOn: []string{"convert"},
+					DependsOn: []v1alpha1.StageDependency{{Name: "convert"}},
 					ChunksGeneratorConfig: &v1alpha1.ChunksGeneratorConfig{
 						Strategy: v1alpha1.ChunkingStrategyMarkdown,
 						MarkdownSplitterConfig: v1alpha1.MarkdownSplitterConfig{
@@ -99,13 +99,13 @@ func GetUnstructuredDataPipelineResourceWithStage(name, namespace string) v1alph
 				{
 					Name:                            "embed",
 					Type:                            v1alpha1.StageTypeVectorEmbeddingsGenerator,
-					DependsOn:                       []string{"chunk"},
+					DependsOn:                       []v1alpha1.StageDependency{{Name: "chunk"}},
 					VectorEmbeddingsGeneratorConfig: &v1alpha1.VectorEmbeddingsGeneratorConfig{},
 				},
 				{
 					Name:      "sync",
 					Type:      v1alpha1.StageTypeDestinationSyncer,
-					DependsOn: []string{"embed"},
+					DependsOn: []v1alpha1.StageDependency{{Name: "embed"}},
 					DestinationSyncerConfig: &v1alpha1.DestinationSyncerConfig{
 						Type: v1alpha1.TypeS3,
 						S3DestinationConfig: v1alpha1.S3Config{

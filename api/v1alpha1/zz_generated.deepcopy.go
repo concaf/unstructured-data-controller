@@ -575,7 +575,7 @@ func (in *PipelineStage) DeepCopyInto(out *PipelineStage) {
 	*out = *in
 	if in.DependsOn != nil {
 		in, out := &in.DependsOn, &out.DependsOn
-		*out = make([]string, len(*in))
+		*out = make([]StageDependency, len(*in))
 		copy(*out, *in)
 	}
 	if in.SourceCrawlerConfig != nil {

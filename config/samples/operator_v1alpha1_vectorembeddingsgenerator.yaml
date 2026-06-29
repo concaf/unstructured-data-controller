@@ -9,6 +9,5 @@ spec:
   stageName: embed
   dependsOn:
     - name: chunk
-      type: ChunksGenerator
   embeddingGeneratorConfig:
     modelName: nomic-ai/nomic-embed-text-v1.5

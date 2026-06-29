@@ -28,7 +28,6 @@ import (
 //	  stageName: convert
 //	  dependsOn:
 //	    - name: crawl                        # upstream stage name
-//	      type: SourceCrawler                      # upstream stage type
 //	  config:
 //	    type: docling
 //	    doclingConfig:

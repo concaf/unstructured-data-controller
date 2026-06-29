@@ -123,7 +123,7 @@ func NewClientFromURL(clientConfig *ClientConfig) *Client {
 // has no outstanding acquisitions (e.g. after a controller restart with stale jobs).
 func (c *Client) safeRelease() {
 	defer func() {
-		recover()
+		_ = recover()
 	}()
 	c.ClientConfig.sem.Release(1)
 }
@@ -269,7 +269,7 @@ func (c *Client) ConvertFile(
 	if err != nil {
 		return nil, fmt.Errorf("failed to get response body: %w", err)
 	}
-	defer responseBody.Close()
+	defer func() { _ = responseBody.Close() }()
 
 	body, err := io.ReadAll(responseBody)
 	if err != nil {
@@ -353,7 +353,7 @@ func (c *Client) GetConvertedFile(ctx context.Context, taskID string) (TaskStatu
 		c.safeRelease()
 		return "", nil, fmt.Errorf("failed to get response body: %w", err)
 	}
-	defer bodyResponse.Close()
+	defer func() { _ = bodyResponse.Close() }()
 
 	if err := json.NewDecoder(bodyResponse).Decode(&doclingResponse); err != nil {
 		c.safeRelease()

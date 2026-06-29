@@ -26,7 +26,6 @@ import (
 //	  stageName: chunk
 //	  dependsOn:
 //	    - name: convert
-//	      type: DocumentProcessor
 //	  config:
 //	    strategy: recursiveCharacterTextSplitter
 //	    recursiveCharacterSplitterConfig:

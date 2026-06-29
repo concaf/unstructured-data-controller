@@ -20,11 +20,19 @@ import (
 	"testing"
 )
 
+func deps(names ...string) []StageDependency {
+	d := make([]StageDependency, len(names))
+	for i, n := range names {
+		d[i] = StageDependency{Name: n}
+	}
+	return d
+}
+
 func crawlerStage(name string, depends ...string) PipelineStage {
 	return PipelineStage{
 		Name:                name,
 		Type:                StageTypeSourceCrawler,
-		DependsOn:           depends,
+		DependsOn:           deps(depends...),
 		SourceCrawlerConfig: &SourceCrawlerConfig{},
 	}
 }
@@ -33,7 +41,7 @@ func docProcStage(name string, depends ...string) PipelineStage {
 	return PipelineStage{
 		Name:                    name,
 		Type:                    StageTypeDocumentProcessor,
-		DependsOn:               depends,
+		DependsOn:               deps(depends...),
 		DocumentProcessorConfig: &DocumentProcessorConfig{},
 	}
 }
@@ -42,7 +50,7 @@ func chunksStage(name string, depends ...string) PipelineStage {
 	return PipelineStage{
 		Name:                  name,
 		Type:                  StageTypeChunksGenerator,
-		DependsOn:             depends,
+		DependsOn:             deps(depends...),
 		ChunksGeneratorConfig: &ChunksGeneratorConfig{},
 	}
 }
@@ -51,7 +59,7 @@ func embedStage(name string, depends ...string) PipelineStage {
 	return PipelineStage{
 		Name:                            name,
 		Type:                            StageTypeVectorEmbeddingsGenerator,
-		DependsOn:                       depends,
+		DependsOn:                       deps(depends...),
 		VectorEmbeddingsGeneratorConfig: &VectorEmbeddingsGeneratorConfig{},
 	}
 }
@@ -60,7 +68,7 @@ func destStage(name string, depends ...string) PipelineStage {
 	return PipelineStage{
 		Name:                    name,
 		Type:                    StageTypeDestinationSyncer,
-		DependsOn:               depends,
+		DependsOn:               deps(depends...),
 		DestinationSyncerConfig: &DestinationSyncerConfig{},
 	}
 }

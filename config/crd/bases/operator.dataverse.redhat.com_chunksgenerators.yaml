@@ -102,24 +102,12 @@ spec:
                 type: object
               dependsOn:
                 items:
-                  description: StageDependency identifies an upstream stage by name
-                    and type.
+                  description: StageDependency identifies an upstream stage by name.
                   properties:
                     name:
                       type: string
-                    type:
-                      description: StageType is the discriminator for the stage union
-                        config.
-                      enum:
-                      - SourceCrawler
-                      - DocumentProcessor
-                      - ChunksGenerator
-                      - VectorEmbeddingsGenerator
-                      - DestinationSyncer
-                      type: string
                   required:
                   - name
-                  - type
                   type: object
                 type: array
               stageName:

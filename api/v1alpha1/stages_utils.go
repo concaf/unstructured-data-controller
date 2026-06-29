@@ -30,8 +30,8 @@ func ValidateStages(stages []PipelineStage) error {
 
 	for _, stage := range stages {
 		for _, dep := range stage.DependsOn {
-			if !stageMap[dep] {
-				return fmt.Errorf("stage %q depends on undefined stage %q", stage.Name, dep)
+			if !stageMap[dep.Name] {
+				return fmt.Errorf("stage %q depends on undefined stage %q", stage.Name, dep.Name)
 			}
 		}
 	}
@@ -48,7 +48,7 @@ func detectCycles(stages []PipelineStage) error {
 	for _, stage := range stages {
 		pendingDeps[stage.Name] = len(stage.DependsOn)
 		for _, dep := range stage.DependsOn {
-			downstreamStages[dep] = append(downstreamStages[dep], stage.Name)
+			downstreamStages[dep.Name] = append(downstreamStages[dep.Name], stage.Name)
 		}
 	}
 

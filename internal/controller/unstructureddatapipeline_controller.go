@@ -97,7 +97,7 @@ func (r *UnstructuredDataPipelineReconciler) Reconcile(ctx context.Context, req 
 	}
 
 	for _, stage := range stages {
-		if err := r.ensureChildCR(ctx, stage, stages, unstructuredDataPipelineCR); err != nil {
+		if err := r.ensureChildCR(ctx, stage, unstructuredDataPipelineCR); err != nil {
 			logger.Error(err, "failed to ensure child CR", "stage", stage.Name)
 			return r.handleError(ctx, unstructuredDataPipelineCR, err)
 		}
@@ -219,10 +219,10 @@ func childCRName(unstructuredDataPipelineCR *operatorv1alpha1.UnstructuredDataPi
 	return unstructuredDataPipelineCR.Name + "-" + stageName
 }
 
-func (r *UnstructuredDataPipelineReconciler) ensureChildCR(ctx context.Context, stage operatorv1alpha1.PipelineStage, allStages []operatorv1alpha1.PipelineStage, unstructuredDataPipelineCR *operatorv1alpha1.UnstructuredDataPipeline) error {
+func (r *UnstructuredDataPipelineReconciler) ensureChildCR(ctx context.Context, stage operatorv1alpha1.PipelineStage, unstructuredDataPipelineCR *operatorv1alpha1.UnstructuredDataPipeline) error {
 	logger := log.FromContext(ctx)
 	crName := childCRName(unstructuredDataPipelineCR, stage.Name)
-	deps := buildStageDependencies(stage, allStages)
+	deps := stage.DependsOn
 
 	switch stage.Type {
 	case operatorv1alpha1.StageTypeSourceCrawler:
@@ -339,23 +339,6 @@ func (r *UnstructuredDataPipelineReconciler) ensureChildCR(ctx context.Context, 
 	return r.markStageCreated(ctx, unstructuredDataPipelineCR, stage.Name)
 }
 
-func buildStageDependencies(stage operatorv1alpha1.PipelineStage, allStages []operatorv1alpha1.PipelineStage) []operatorv1alpha1.StageDependency {
-	if len(stage.DependsOn) == 0 {
-		return nil
-	}
-	stageMap := make(map[string]operatorv1alpha1.StageType, len(allStages))
-	for _, s := range allStages {
-		stageMap[s.Name] = s.Type
-	}
-	deps := make([]operatorv1alpha1.StageDependency, 0, len(stage.DependsOn))
-	for _, depName := range stage.DependsOn {
-		deps = append(deps, operatorv1alpha1.StageDependency{
-			Name: depName,
-			Type: stageMap[depName],
-		})
-	}
-	return deps
-}
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *UnstructuredDataPipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {

@@ -26,7 +26,6 @@ import (
 //	  stageName: sync
 //	  dependsOn:
 //	    - name: embed
-//	      type: VectorEmbeddingsGenerator
 //	  destinationSyncerConfig:
 //	    type: s3
 //	    s3DestinationConfig:

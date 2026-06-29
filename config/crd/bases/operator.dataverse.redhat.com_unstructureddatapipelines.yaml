@@ -111,7 +111,14 @@ spec:
                       type: object
                     dependsOn:
                       items:
-                        type: string
+                        description: StageDependency identifies an upstream stage
+                          by name.
+                        properties:
+                          name:
+                            type: string
+                        required:
+                        - name
+                        type: object
                       type: array
                     destinationSyncerConfig:
                       description: DestinationSyncerConfig configures where to write

@@ -17,7 +17,8 @@ spec:
           prefix: documents/
     - name: convert
       type: DocumentProcessor
-      dependsOn: [crawl]
+      dependsOn:
+        - name: crawl
       documentProcessorConfig:
         type: docling
         doclingConfig:
@@ -26,7 +27,8 @@ spec:
           ocr_engine: easyocr
     - name: chunk
       type: ChunksGenerator
-      dependsOn: [convert]
+      dependsOn:
+        - name: convert
       chunksGeneratorConfig:
         strategy: recursiveCharacterTextSplitter
         recursiveCharacterSplitterConfig:
@@ -34,12 +36,14 @@ spec:
           chunkOverlap: 200
     - name: embed
       type: VectorEmbeddingsGenerator
-      dependsOn: [chunk]
+      dependsOn:
+        - name: chunk
       vectorEmbeddingsGeneratorConfig:
         modelName: nomic-ai/nomic-embed-text-v1.5
     - name: sync
       type: DestinationSyncer
-      dependsOn: [embed]
+      dependsOn:
+        - name: embed
       destinationSyncerConfig:
         type: s3
         s3DestinationConfig:

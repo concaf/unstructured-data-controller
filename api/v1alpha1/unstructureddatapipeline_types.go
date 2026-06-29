@@ -35,7 +35,8 @@ import (
 //	          prefix: documents/
 //	    - name: convert
 //	      type: DocumentProcessor
-//	      dependsOn: [crawl]
+//	      dependsOn:
+//	        - name: crawl
 //	      documentProcessorConfig:
 //	        type: docling
 //	    - name: chunk
@@ -123,7 +124,7 @@ type PipelineStage struct {
 	Type StageType `json:"type"`
 
 	// +optional
-	DependsOn []string `json:"dependsOn,omitempty"`
+	DependsOn []StageDependency `json:"dependsOn,omitempty"`
 
 	// +optional
 	SourceCrawlerConfig *SourceCrawlerConfig `json:"sourceCrawlerConfig,omitempty"`
@@ -149,10 +150,9 @@ type DestinationSyncerConfig struct {
 	S3DestinationConfig S3Config             `json:"s3DestinationConfig,omitempty"`
 }
 
-// StageDependency identifies an upstream stage by name and type.
+// StageDependency identifies an upstream stage by name.
 type StageDependency struct {
-	Name string    `json:"name"`
-	Type StageType `json:"type"`
+	Name string `json:"name"`
 }
 
 type DocumentProcessorConfig struct {
