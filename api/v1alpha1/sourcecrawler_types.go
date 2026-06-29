@@ -52,12 +52,14 @@ type SourceCrawlerSpec struct {
 type SourceCrawlerStatus struct {
 	LastAppliedGeneration int64              `json:"lastAppliedGeneration,omitempty"`
 	Conditions            []metav1.Condition `json:"conditions,omitempty"`
+	FilesProcessed        int64              `json:"filesProcessed,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.conditions[?(@.type==\"SourceCrawlerReady\")].status"
 // +kubebuilder:printcolumn:name="Message",type="string",JSONPath=".status.conditions[?(@.type==\"SourceCrawlerReady\")].message"
+// +kubebuilder:printcolumn:name="Files",type="integer",JSONPath=".status.filesProcessed"
 
 // SourceCrawler is the Schema for the sourcecrawlers API.
 type SourceCrawler struct {
@@ -75,6 +77,10 @@ type SourceCrawlerList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []SourceCrawler `json:"items"`
+}
+
+func (c *SourceCrawler) GetFilesProcessed() int64 {
+	return c.Status.FilesProcessed
 }
 
 func (c *SourceCrawler) SetWaiting() {

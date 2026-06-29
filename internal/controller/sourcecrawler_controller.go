@@ -132,6 +132,7 @@ func (r *SourceCrawlerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	successMessage := fmt.Sprintf("successfully reconciled source crawler: %s", sourceCrawlerCR.Name)
 	if err := controllerutils.StatusPatch(ctx, r.Client, sourceCrawlerCR, func() {
+		sourceCrawlerCR.Status.FilesProcessed += int64(len(storedFiles))
 		sourceCrawlerCR.UpdateStatus(successMessage, nil)
 	}); err != nil {
 		logger.Error(err, "failed to update SourceCrawler CR status")
@@ -248,10 +249,10 @@ func (r *SourceCrawlerReconciler) findSecretDependents(ctx context.Context, obj 
 func (r *SourceCrawlerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.SourceCrawler{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Watches(&operatorv1alpha1.DocumentProcessor{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
-		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
-		Watches(&operatorv1alpha1.VectorEmbeddingsGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
-		Watches(&operatorv1alpha1.DestinationSyncer{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
+		Watches(&operatorv1alpha1.DocumentProcessor{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
+		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
+		Watches(&operatorv1alpha1.VectorEmbeddingsGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
+		Watches(&operatorv1alpha1.DestinationSyncer{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.findSecretDependents)).
 		Named("sourcecrawler").
 		Complete(r)

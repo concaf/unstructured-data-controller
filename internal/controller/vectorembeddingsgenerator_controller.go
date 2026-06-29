@@ -116,12 +116,17 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 	}
 
 	embeddingErrors := []error{}
+	var filesProcessed int64
 	for _, chunksFilePath := range filePaths {
 		logger.Info("processing chunked file for embedding", "file", chunksFilePath)
-		if _, err := r.processChunkedFile(ctx, chunksFilePath, vectorEmbeddingsGeneratorCR); err != nil {
+		processed, err := r.processChunkedFile(ctx, chunksFilePath, vectorEmbeddingsGeneratorCR)
+		if err != nil {
 			embeddingErrors = append(embeddingErrors, err)
 			logger.Error(err, "failed to process chunked file", "file", chunksFilePath)
 			continue
+		}
+		if processed {
+			filesProcessed++
 		}
 	}
 
@@ -133,6 +138,7 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 	// all done, let's update the status to ready
 	successMessage := fmt.Sprintf("successfully reconciled vector embeddings generator: %s", vectorEmbeddingsGeneratorCR.Name)
 	if err := controllerutils.StatusPatch(ctx, r.Client, vectorEmbeddingsGeneratorCR, func() {
+		vectorEmbeddingsGeneratorCR.Status.FilesProcessed += filesProcessed
 		vectorEmbeddingsGeneratorCR.UpdateStatus(successMessage, nil)
 	}); err != nil {
 		logger.Error(err, "failed to update VectorEmbeddingsGenerator CR status", "namespace", vectorEmbeddingsGeneratorCR.Namespace, "name", vectorEmbeddingsGeneratorCR.Name)
@@ -380,9 +386,9 @@ func (r *VectorEmbeddingsGeneratorReconciler) findDependents(ctx context.Context
 func (r *VectorEmbeddingsGeneratorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.VectorEmbeddingsGenerator{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Watches(&operatorv1alpha1.SourceCrawler{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
-		Watches(&operatorv1alpha1.DocumentProcessor{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
-		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
-		Watches(&operatorv1alpha1.DestinationSyncer{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
+		Watches(&operatorv1alpha1.SourceCrawler{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
+		Watches(&operatorv1alpha1.DocumentProcessor{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
+		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
+		Watches(&operatorv1alpha1.DestinationSyncer{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Complete(r)
 }

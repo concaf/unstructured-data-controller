@@ -68,13 +68,16 @@ func (s *S3BucketSource) SyncFilesToFilestore(ctx context.Context, fs *filestore
 		logger.Info("storing file", "file", file.FilePath)
 		sourceFileMap[file.FilePath] = true
 
-		if err := s.storeFile(ctx, fs, &file); err != nil {
+		stored, err := s.storeFile(ctx, fs, &file)
+		if err != nil {
 			logger.Error(err, "failed to store file", "file", file.FilePath)
 			errorList[file.FilePath] = err
 			continue
 		}
-		logger.Info("successfully stored file", "file", file.FilePath)
-		storedFiles = append(storedFiles, file)
+		if stored {
+			logger.Info("successfully stored file", "file", file.FilePath)
+			storedFiles = append(storedFiles, file)
+		}
 	}
 	// Listing all the file in the local s3 filestore
 	localFiles, err := fs.ListFilesInPath(ctx, s.outputPrefix())
@@ -114,7 +117,7 @@ func (s *S3BucketSource) SyncFilesToFilestore(ctx context.Context, fs *filestore
 
 // storeFile will store the given file to the filestore
 // it will make sure that the file is unique by comparing the object's ETag with the file's metadata
-func (s *S3BucketSource) storeFile(ctx context.Context, fs *filestore.FileStore, file *RawFileMetadata) error {
+func (s *S3BucketSource) storeFile(ctx context.Context, fs *filestore.FileStore, file *RawFileMetadata) (bool, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("storing file", "file", file.FilePath)
 
@@ -127,13 +130,13 @@ func (s *S3BucketSource) storeFile(ctx context.Context, fs *filestore.FileStore,
 	fileExists, err := fs.Exists(ctx, filePath)
 	if err != nil {
 		logger.Error(err, "failed to check if file exists in filestore", "file", filePath)
-		return err
+		return false, err
 	}
 
 	metadataExists, err := fs.Exists(ctx, metadataPath)
 	if err != nil {
 		logger.Error(err, "failed to check if metadata file exists in filestore", "file", metadataPath)
-		return err
+		return false, err
 	}
 
 	if fileExists && metadataExists {
@@ -144,7 +147,7 @@ func (s *S3BucketSource) storeFile(ctx context.Context, fs *filestore.FileStore,
 		metadata, err := fs.Retrieve(ctx, metadataPath)
 		if err != nil {
 			logger.Error(err, "failed to retrieve metadata file from filestore", "file", metadataPath)
-			return err
+			return false, err
 		}
 
 		// unmarshal the metadata file into a FileMetadata struct
@@ -152,13 +155,13 @@ func (s *S3BucketSource) storeFile(ctx context.Context, fs *filestore.FileStore,
 		err = json.Unmarshal(metadata, &existingFile)
 		if err != nil {
 			logger.Error(err, "failed to unmarshal metadata file", "file", metadataPath)
-			return err
+			return false, err
 		}
 
 		if existingFile.UID == file.UID {
 			// the file and the metadata file are the same, so we can skip storing it
 			logger.Info("file and metadata file are the same, skipping ...", "file", filePath)
-			return nil
+			return false, nil
 		}
 	}
 
@@ -170,31 +173,31 @@ func (s *S3BucketSource) storeFile(ctx context.Context, fs *filestore.FileStore,
 	objectOutput, err := awsclienthandler.GetObject(ctx, s.S3Client, s.Bucket, s3Key)
 	if err != nil {
 		logger.Error(err, "failed to get object from S3", "file", filePath)
-		return err
+		return false, err
 	}
 
 	data, err := io.ReadAll(objectOutput.Body)
 	if err != nil {
 		logger.Error(err, "failed to read object from S3", "file", filePath)
-		return err
+		return false, err
 	}
 	if err = fs.Store(ctx, filePath, data); err != nil {
 		logger.Error(err, "failed to store file in filestore", "file", filePath)
-		return err
+		return false, err
 	}
 
 	metadataData, err := json.Marshal(file)
 	if err != nil {
 		logger.Error(err, "failed to marshal metadata file", "file", metadataPath)
-		return err
+		return false, err
 	}
 	if err = fs.Store(ctx, metadataPath, metadataData); err != nil {
 		logger.Error(err, "failed to store metadata file in filestore", "file", metadataPath)
-		return err
+		return false, err
 	}
 
 	logger.Info("successfully stored file and metadata file in filestore", "file", filePath, "metadataFile", metadataPath)
-	return nil
+	return true, nil
 }
 
 func (s *S3BucketSource) outputPrefix() string {

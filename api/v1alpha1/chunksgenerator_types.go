@@ -52,12 +52,14 @@ type ChunksGeneratorSpec struct {
 type ChunksGeneratorStatus struct {
 	LastAppliedGeneration int64              `json:"lastAppliedGeneration,omitempty"`
 	Conditions            []metav1.Condition `json:"conditions,omitempty"`
+	FilesProcessed        int64              `json:"filesProcessed,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.conditions[?(@.type==\"ChunksGeneratorReady\")].status"
 // +kubebuilder:printcolumn:name="Message",type="string",JSONPath=".status.conditions[?(@.type==\"ChunksGeneratorReady\")].message"
+// +kubebuilder:printcolumn:name="Files",type="integer",JSONPath=".status.filesProcessed"
 
 // ChunksGenerator is the Schema for the chunksgenerators API
 type ChunksGenerator struct {
@@ -75,6 +77,10 @@ type ChunksGeneratorList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ChunksGenerator `json:"items"`
+}
+
+func (c *ChunksGenerator) GetFilesProcessed() int64 {
+	return c.Status.FilesProcessed
 }
 
 func (c *ChunksGenerator) SetWaiting() {

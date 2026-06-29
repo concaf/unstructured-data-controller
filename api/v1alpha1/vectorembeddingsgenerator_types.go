@@ -51,12 +51,14 @@ type VectorEmbeddingsGeneratorSpec struct {
 type VectorEmbeddingsGeneratorStatus struct {
 	LastAppliedGeneration int64              `json:"lastAppliedGeneration,omitempty"`
 	Conditions            []metav1.Condition `json:"conditions,omitempty"`
+	FilesProcessed        int64              `json:"filesProcessed,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.conditions[?(@.type==\"VectorEmbeddingGenerationReady\")].status"
 // +kubebuilder:printcolumn:name="Message",type="string",JSONPath=".status.conditions[?(@.type==\"VectorEmbeddingGenerationReady\")].message"
+// +kubebuilder:printcolumn:name="Files",type="integer",JSONPath=".status.filesProcessed"
 
 // VectorEmbeddingsGenerator is the Schema for the vectorembeddingsgenerators API.
 type VectorEmbeddingsGenerator struct {
@@ -74,6 +76,10 @@ type VectorEmbeddingsGeneratorList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []VectorEmbeddingsGenerator `json:"items"`
+}
+
+func (c *VectorEmbeddingsGenerator) GetFilesProcessed() int64 {
+	return c.Status.FilesProcessed
 }
 
 func (c *VectorEmbeddingsGenerator) SetWaiting() {

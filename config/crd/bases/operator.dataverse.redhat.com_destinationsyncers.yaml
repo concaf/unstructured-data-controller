@@ -21,6 +21,9 @@ spec:
     - jsonPath: .status.conditions[?(@.type=="DestinationSyncerReady")].message
       name: Message
       type: string
+    - jsonPath: .status.filesProcessed
+      name: Files
+      type: integer
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -139,6 +142,9 @@ spec:
                   - type
                   type: object
                 type: array
+              filesProcessed:
+                format: int64
+                type: integer
               lastAppliedGeneration:
                 format: int64
                 type: integer

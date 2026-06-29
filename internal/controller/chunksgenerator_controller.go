@@ -125,10 +125,11 @@ func (r *ChunksGeneratorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	chunkingErrors := []error{}
 	skippedFiles := []string{}
+	var filesProcessed int64
 
 	for _, convertedFilePath := range filePaths {
 		logger.Info("processing converted file", "file", convertedFilePath)
-		_, err := r.processConvertedFile(ctx, convertedFilePath, chunksGeneratorCR)
+		processed, err := r.processConvertedFile(ctx, convertedFilePath, chunksGeneratorCR)
 		if err != nil {
 			if strings.Contains(err.Error(), langchain.SemaphoreAcquireError) {
 				logger.Error(err, "failed to process converted file, semaphore acquire error, will try again later", "file", convertedFilePath)
@@ -138,6 +139,9 @@ func (r *ChunksGeneratorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			chunkingErrors = append(chunkingErrors, err)
 			logger.Error(err, "failed to process converted file", "file", convertedFilePath)
 			continue
+		}
+		if processed {
+			filesProcessed++
 		}
 		logger.Info("successfully processed converted file", "file", convertedFilePath)
 	}
@@ -157,6 +161,7 @@ func (r *ChunksGeneratorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	successMessage := fmt.Sprintf("successfully reconciled chunks generator: %s", chunksGeneratorCR.Name)
 	if err := controllerutils.StatusPatch(ctx, r.Client, chunksGeneratorCR, func() {
+		chunksGeneratorCR.Status.FilesProcessed += filesProcessed
 		chunksGeneratorCR.UpdateStatus(successMessage, nil)
 	}); err != nil {
 		logger.Error(err, "failed to update ChunksGenerator CR status", "namespace", chunksGeneratorCR.Namespace, "name", chunksGeneratorCR.Name)
@@ -365,10 +370,10 @@ func (r *ChunksGeneratorReconciler) findDependents(ctx context.Context, obj clie
 func (r *ChunksGeneratorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.ChunksGenerator{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Watches(&operatorv1alpha1.SourceCrawler{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
-		Watches(&operatorv1alpha1.DocumentProcessor{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
-		Watches(&operatorv1alpha1.VectorEmbeddingsGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
-		Watches(&operatorv1alpha1.DestinationSyncer{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
+		Watches(&operatorv1alpha1.SourceCrawler{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
+		Watches(&operatorv1alpha1.DocumentProcessor{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
+		Watches(&operatorv1alpha1.VectorEmbeddingsGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
+		Watches(&operatorv1alpha1.DestinationSyncer{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Complete(r)
 }
 func (r *ChunksGeneratorReconciler) handleError(ctx context.Context, chunksGeneratorCR *operatorv1alpha1.ChunksGenerator, err error) (ctrl.Result, error) {

@@ -59,6 +59,7 @@ type DocumentProcessorStatus struct {
 	Conditions              []metav1.Condition `json:"conditions,omitempty"`
 	Jobs                    []Job              `json:"jobs,omitempty"`
 	PermanentlyFailingFiles []string           `json:"permanentlyFailingFiles,omitempty"`
+	FilesProcessed          int64              `json:"filesProcessed,omitempty"`
 }
 
 type Job struct {
@@ -76,6 +77,7 @@ type Job struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.conditions[?(@.type==\"DocumentProcessorReady\")].status"
 // +kubebuilder:printcolumn:name="Message",type="string",JSONPath=".status.conditions[?(@.type==\"DocumentProcessorReady\")].message"
+// +kubebuilder:printcolumn:name="Files",type="integer",JSONPath=".status.filesProcessed"
 
 // DocumentProcessor is the Schema for the documentprocessors API
 type DocumentProcessor struct {
@@ -93,6 +95,10 @@ type DocumentProcessorList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []DocumentProcessor `json:"items"`
+}
+
+func (d *DocumentProcessor) GetFilesProcessed() int64 {
+	return d.Status.FilesProcessed
 }
 
 func (d *DocumentProcessor) SetWaiting() {

@@ -211,8 +211,10 @@ func (fs *FileStore) Retrieve(ctx context.Context, path string) ([]byte, error) 
 	}
 
 	// write to local filesystem
-	err = os.WriteFile(localPath, data, 0644)
-	if err != nil {
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(localPath, data, 0644); err != nil {
 		return nil, err
 	}
 

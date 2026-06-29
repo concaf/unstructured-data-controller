@@ -27,9 +27,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	operatorv1alpha1 "github.com/redhat-data-and-ai/unstructured-data-controller/api/v1alpha1"
 	"github.com/redhat-data-and-ai/unstructured-data-controller/internal/controller/controllerutils"
@@ -339,16 +341,15 @@ func (r *UnstructuredDataPipelineReconciler) ensureChildCR(ctx context.Context, 
 	return r.markStageCreated(ctx, unstructuredDataPipelineCR, stage.Name)
 }
 
-
 // SetupWithManager sets up the controller with the Manager.
 func (r *UnstructuredDataPipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&operatorv1alpha1.UnstructuredDataPipeline{}).
-		Owns(&operatorv1alpha1.SourceCrawler{}).
-		Owns(&operatorv1alpha1.DocumentProcessor{}).
-		Owns(&operatorv1alpha1.ChunksGenerator{}).
-		Owns(&operatorv1alpha1.VectorEmbeddingsGenerator{}).
-		Owns(&operatorv1alpha1.DestinationSyncer{}).
+		For(&operatorv1alpha1.UnstructuredDataPipeline{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&operatorv1alpha1.SourceCrawler{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&operatorv1alpha1.DocumentProcessor{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&operatorv1alpha1.ChunksGenerator{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&operatorv1alpha1.VectorEmbeddingsGenerator{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&operatorv1alpha1.DestinationSyncer{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Complete(r)
 }
 

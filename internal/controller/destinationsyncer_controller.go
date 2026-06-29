@@ -110,6 +110,7 @@ func (r *DestinationSyncerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return r.handleError(ctx, destinationSyncCR, fmt.Errorf("failed to create destination S3 client: %w", err))
 	}
 
+	var totalFilesSynced int64
 	for _, dep := range destinationSyncCR.Spec.DependsOn {
 		destination := &unstructured.S3Destination{
 			S3Client:  destinationS3Client,
@@ -130,11 +131,13 @@ func (r *DestinationSyncerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			logger.Error(err, "failed to ingest files to destination", "stage", dep.Name)
 			return r.handleError(ctx, destinationSyncCR, err)
 		}
+		totalFilesSynced += int64(len(filePaths))
 		logger.Info("successfully ingested files to destination", "stage", dep.Name)
 	}
 
 	successMessage := fmt.Sprintf("successfully reconciled destination sync: %s", destinationSyncCR.Name)
 	if err := controllerutils.StatusPatch(ctx, r.Client, destinationSyncCR, func() {
+		destinationSyncCR.Status.FilesProcessed += totalFilesSynced
 		destinationSyncCR.UpdateStatus(successMessage, nil)
 	}); err != nil {
 		logger.Error(err, "failed to update DestinationSyncer CR status")
@@ -202,10 +205,10 @@ func (r *DestinationSyncerReconciler) findSecretDependents(ctx context.Context, 
 func (r *DestinationSyncerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.DestinationSyncer{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Watches(&operatorv1alpha1.SourceCrawler{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
-		Watches(&operatorv1alpha1.DocumentProcessor{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
-		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
-		Watches(&operatorv1alpha1.VectorEmbeddingsGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
+		Watches(&operatorv1alpha1.SourceCrawler{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
+		Watches(&operatorv1alpha1.DocumentProcessor{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
+		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
+		Watches(&operatorv1alpha1.VectorEmbeddingsGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.findSecretDependents)).
 		Named("destinationsync").
 		Complete(r)

@@ -237,6 +237,7 @@ func (r *DocumentProcessorReconciler) reconcileJob(ctx context.Context, job oper
 		// remove the job from the status as nothing needs to be done for this job
 		if updateErr := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
 			documentProcessorCR.DeleteJobByFilePath(job.FilePath)
+			documentProcessorCR.Status.FilesProcessed++
 		}); updateErr != nil {
 			logger.Error(updateErr, "failed to delete job from status as it has completed successfully", "filePath", job.FilePath)
 			return updateErr
@@ -505,10 +506,10 @@ func (r *DocumentProcessorReconciler) findDependents(ctx context.Context, obj cl
 func (r *DocumentProcessorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.DocumentProcessor{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Watches(&operatorv1alpha1.SourceCrawler{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
-		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
-		Watches(&operatorv1alpha1.VectorEmbeddingsGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
-		Watches(&operatorv1alpha1.DestinationSyncer{}, handler.EnqueueRequestsFromMapFunc(r.findDependents)).
+		Watches(&operatorv1alpha1.SourceCrawler{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
+		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
+		Watches(&operatorv1alpha1.VectorEmbeddingsGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
+		Watches(&operatorv1alpha1.DestinationSyncer{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Named("documentprocessor").
 		Complete(r)
 }
