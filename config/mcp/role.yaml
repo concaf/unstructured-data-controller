@@ -1,0 +1,16 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mcp-server-role
+  labels:
+    app: mcp-server
+rules:
+# Allow listing and getting UnstructuredDataPipeline CRs
+- apiGroups:
+  - operator.dataverse.redhat.com
+  resources:
+  - unstructureddatapipelines
+  verbs:
+  - get
+  - list
+  - watch

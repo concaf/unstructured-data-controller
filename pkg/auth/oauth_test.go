@@ -47,7 +47,7 @@ func (m *mockProvider) IntrospectToken(ctx context.Context, token string) (*Intr
 func TestNewOAuthConfigFromEnv(t *testing.T) {
 	for _, key := range []string{
 		"SSO_CLIENT_ID", "SSO_CLIENT_SECRET", "SSO_AUTHORIZATION_URL",
-		"SSO_TOKEN_URL", "SSO_INTROSPECTION_URL", "SSO_ISSUER_HOST", "SSO_CALLBACK_URL",
+		"SSO_TOKEN_URL", "SSO_INTROSPECTION_URL", "SSO_CALLBACK_URL",
 	} {
 		t.Setenv(key, "")
 	}

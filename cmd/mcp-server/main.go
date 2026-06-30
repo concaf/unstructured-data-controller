@@ -18,7 +18,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -26,9 +25,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	mcptools "github.com/redhat-data-and-ai/unstructured-data-controller/internal/mcp/tools"
 	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/auth"
+	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/embedding"
+	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/k8sclient"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 const (
@@ -42,6 +46,7 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
+	ctrl.SetLogger(logr.FromSlogHandler(logger.Handler()))
 
 	oauthCfg, err := auth.NewOAuthConfigFromEnv()
 	if err != nil {
@@ -55,6 +60,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	k8sClient, err := k8sclient.NewClient()
+	if err != nil {
+		slog.Error("failed to create kubernetes client", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("kubernetes client initialized successfully")
+
 	mcpServer := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    serverName,
@@ -63,7 +75,15 @@ func main() {
 		nil,
 	)
 
-	registerTools(mcpServer)
+	embeddingClient := embedding.NewHTTPClient(&embedding.HTTPClientConfig{
+		Endpoint:   os.Getenv("EMBEDDING_ENDPOINT"),
+		APIKey:     os.Getenv("EMBEDDING_API_KEY"),
+		AuthFormat: "Bearer",
+		ModelName:  os.Getenv("EMBEDDING_MODEL_NAME"),
+	})
+
+	mcptools.RegisterListPipelines(mcpServer, k8sClient)
+	mcptools.RegisterGetChunksForEmbeddings(mcpServer, embeddingClient)
 
 	oauthStore := auth.NewOAuthStore()
 	oauthMiddleware := auth.NewMiddleware(provider, logger)
@@ -138,34 +158,6 @@ func main() {
 	oauthMiddleware.Close()
 	oauthStore.Close()
 	slog.Info("MCP server stopped")
-}
-
-type pingArgs struct {
-	Message string `json:"message,omitempty" jsonschema:"Optional message to echo back"`
-}
-
-func registerTools(s *mcp.Server) {
-	mcp.AddTool(s, &mcp.Tool{
-		Name:        "ping",
-		Description: "Health check tool that returns pong along with the authenticated user's name",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, args pingArgs) (*mcp.CallToolResult, any, error) {
-		user := "unknown"
-		if info, ok := auth.TokenInfoFromContext(ctx); ok {
-			if info.Username != "" {
-				user = info.Username
-			} else if info.Sub != "" {
-				user = info.Sub
-			}
-		}
-
-		text := fmt.Sprintf("pong (user: %s)", user)
-		if args.Message != "" {
-			text = fmt.Sprintf("pong: %s (user: %s)", args.Message, user)
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: text}},
-		}, nil, nil
-	})
 }
 
 func healthHandler(w http.ResponseWriter, _ *http.Request) {

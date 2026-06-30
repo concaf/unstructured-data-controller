@@ -38,12 +38,20 @@ All configuration is via environment variables.
 | `SSO_TOKEN_URL`         | SSO token endpoint (e.g. `https://sso.example.com/auth/realms/myrealm/protocol/openid-connect/token`)        |
 | `SSO_INTROSPECTION_URL` | SSO token introspection endpoint (RFC 7662)                                                                  |
 | `SSO_CALLBACK_URL`      | Callback URL pointing to this server's `/auth/callback/oidc` endpoint                                        |
+| `EMBEDDING_ENDPOINT`   | URL of the embedding service (e.g. `https://host/v1/embeddings`)                                             |
+| `EMBEDDING_API_KEY`    | API key for the embedding service                                                                            |
+| `EMBEDDING_MODEL_NAME` | Model name to use for generating embeddings                                                                  |
+| `SNOWFLAKE_ACCOUNT`    | Snowflake account identifier                                                                                 |
 
 ### Optional
 
-| Variable          | Default | Description                |
-| ----------------- | ------- | -------------------------- |
-| `MCP_SERVER_PORT` | `8080`  | Port the server listens on |
+| Variable              | Default                              | Description                                             |
+| --------------------- | ------------------------------------ | ------------------------------------------------------- |
+| `MCP_SERVER_PORT`     | `8080`                               | Port the server listens on                              |
+| `PIPELINE_NAMESPACE`  | `unstructured-controller-namespace`  | Kubernetes namespace to list pipelines from              |
+| `KUBECONFIG`          | `~/.kube/config`                     | Path to kubeconfig file (only used outside a cluster)   |
+
+The Snowflake connection uses the `PUBLIC` role by default to avoid defaulting to an overprivileged role.
 
 ### Example `.env`
 
@@ -54,9 +62,21 @@ SSO_AUTHORIZATION_URL=https://sso.example.com/auth/realms/myrealm/protocol/openi
 SSO_TOKEN_URL=https://sso.example.com/auth/realms/myrealm/protocol/openid-connect/token
 SSO_INTROSPECTION_URL=https://sso.example.com/auth/realms/myrealm/protocol/openid-connect/token/introspect
 SSO_CALLBACK_URL=http://localhost:8080/auth/callback/oidc
+SNOWFLAKE_ACCOUNT=your-account
+EMBEDDING_ENDPOINT=https://your-embedding-service/v1/embeddings
+EMBEDDING_API_KEY=your-api-key
+EMBEDDING_MODEL_NAME=your-model-name
 ```
 
 ## Running
+
+### In-cluster
+
+When deployed inside Kubernetes, the server automatically uses the pod's service account for cluster access. No `KUBECONFIG` is needed.
+
+### Local development
+
+The server detects it is running outside a cluster and falls back to your local kubeconfig (`KUBECONFIG` env var or `~/.kube/config`). Point your context at a Kind or Minikube cluster with the CRDs installed.
 
 ```bash
 # Build

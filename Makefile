@@ -56,6 +56,8 @@ endif
 OPERATOR_SDK_VERSION ?= v1.42.0
 # Image URL to use all building/pushing image targets
 IMG ?= $(IMAGE_TAG_BASE):latest
+# MCP Server image name
+IMG_MCP ?= $(IMAGE_TAG_BASE)-mcp-server:latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -180,6 +182,14 @@ docker-build: ## Build docker image with the manager.
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
 
+.PHONY: docker-build-mcp
+docker-build-mcp: ## Build docker image for the MCP server.
+	$(CONTAINER_TOOL) build -f Dockerfile.mcp -t ${IMG_MCP} .
+
+.PHONY: docker-push-mcp
+docker-push-mcp: ## Push docker image for the MCP server.
+	$(CONTAINER_TOOL) push ${IMG_MCP}
+
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
 # - be able to use docker buildx. More info: https://docs.docker.com/build/buildx/
@@ -234,6 +244,20 @@ generate-deploy-manifests: manifests kustomize
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/deploy | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
+
+.PHONY: deploy-mcp
+deploy-mcp: kustomize ## Deploy MCP server to the K8s cluster specified in ~/.kube/config.
+	cd config/mcp && $(KUSTOMIZE) edit set image mcp-server=${IMG_MCP} && $(KUSTOMIZE) edit set namespace "${DEPLOYMENT_NAMESPACE}"
+	$(KUSTOMIZE) build config/mcp | $(KUBECTL) apply -f -
+
+.PHONY: generate-mcp-manifests
+generate-mcp-manifests: kustomize
+	cd config/mcp && $(KUSTOMIZE) edit set image mcp-server=${IMG_MCP} && $(KUSTOMIZE) edit set namespace "${DEPLOYMENT_NAMESPACE}"
+	$(KUSTOMIZE) build config/mcp -o ${OUTPUT_FILE}
+
+.PHONY: undeploy-mcp
+undeploy-mcp: kustomize ## Undeploy MCP server from the K8s cluster specified in ~/.kube/config.
+	$(KUSTOMIZE) build config/mcp | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
 ##@ Dependencies
 

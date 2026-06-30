@@ -1,0 +1,33 @@
+# Build the manager binary
+FROM registry.access.redhat.com/ubi9/go-toolset:1.26 AS builder
+
+WORKDIR /opt/app-root/src
+
+# Build arguments for multi-platform support
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
+# Copy the Go Modules manifests (for dependency caching)
+COPY go.mod go.mod
+COPY go.sum go.sum
+COPY vendor/ vendor/
+
+# Copy the go source
+COPY cmd/ cmd/
+COPY pkg/ pkg/
+COPY internal/ internal/
+COPY api/ api/
+
+# Build
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -a -o mcp-server cmd/mcp-server/main.go
+
+# Use Red Hat UBI minimal as runtime image
+FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+
+WORKDIR /
+COPY --from=builder /opt/app-root/src/mcp-server .
+
+USER 65532:65532
+
+ENTRYPOINT ["/mcp-server"]

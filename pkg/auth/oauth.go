@@ -67,7 +67,10 @@ type IntrospectionResponse struct {
 
 type contextKey int
 
-const tokenInfoKey contextKey = iota
+const (
+	tokenInfoKey contextKey = iota
+	accessTokenKey
+)
 
 // TokenInfoFromContext retrieves the IntrospectionResponse stored by the auth middleware.
 func TokenInfoFromContext(ctx context.Context) (*IntrospectionResponse, bool) {
@@ -78,6 +81,17 @@ func TokenInfoFromContext(ctx context.Context) (*IntrospectionResponse, bool) {
 // WithTokenInfo stores the IntrospectionResponse in the given context.
 func WithTokenInfo(ctx context.Context, info *IntrospectionResponse) context.Context {
 	return context.WithValue(ctx, tokenInfoKey, info)
+}
+
+// AccessTokenFromContext retrieves the raw OAuth access token string stored by the auth middleware.
+func AccessTokenFromContext(ctx context.Context) (string, bool) {
+	token, ok := ctx.Value(accessTokenKey).(string)
+	return token, ok
+}
+
+// WithAccessToken stores the raw OAuth access token in the given context.
+func WithAccessToken(ctx context.Context, token string) context.Context {
+	return context.WithValue(ctx, accessTokenKey, token)
 }
 
 type tokenCacheEntry struct {
@@ -158,6 +172,7 @@ func (m *Middleware) Authenticate(next http.Handler) http.Handler {
 		}
 
 		ctx := WithTokenInfo(r.Context(), resp)
+		ctx = WithAccessToken(ctx, token)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

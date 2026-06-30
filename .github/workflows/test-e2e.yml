@@ -17,6 +17,7 @@ env:
   NAMESPACE: unstructured-controller-namespace
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  MCP_IMAGE_NAME: ${{ github.repository }}-mcp-server
 
 jobs:
   build-and-push:
@@ -66,6 +67,55 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  build-and-push-mcp:
+    name: Build MCP Server Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout base
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Determine image tag
+        id: image-tag
+        run: |
+          echo "tag=sha-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{github.actor}}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.MCP_IMAGE_NAME }}
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=ref,event=branch,enable=${{ startsWith(github.ref, 'refs/heads/release-') }}
+            type=ref,event=pr
+            type=ref,event=tag
+            type=raw,value=${{ steps.image-tag.outputs.tag }},enable=${{ github.ref_type != 'tag' }}
+
+      - name: Build and push MCP server image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile.mcp
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
   test-e2e:
     name: Run E2E Tests
     runs-on: ubuntu-latest
