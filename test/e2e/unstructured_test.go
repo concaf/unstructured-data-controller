@@ -149,7 +149,7 @@ func TestUnstructuredDataLoad(t *testing.T) {
 
 			// create pipeline CR with SQS queue URL
 			unstructuredDataPipeline := operatorUtils.GetUnstructuredDataPipelineResourceWithStage(dataPipelineCRName, testNamespace)
-			unstructuredDataPipeline.Spec.SecretRef = unstructuredSecretName
+			unstructuredDataPipeline.Spec.SecretRef = "pipeline-secret"
 			unstructuredDataPipeline.Spec.Stages[0].SourceCrawlerConfig.S3Config.SQSQueueURL = queueURL
 			t.Log("create unstructured datapipeline CR ...")
 			if err := kubeClient.Resources(testNamespace).Create(ctx, &unstructuredDataPipeline); err != nil {
