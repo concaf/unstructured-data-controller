@@ -100,7 +100,9 @@ func GetUnstructuredDataPipelineResourceWithStage(name, namespace string) v1alph
 					Name:                            "embed",
 					Type:                            v1alpha1.StageTypeVectorEmbeddingsGenerator,
 					DependsOn:                       []v1alpha1.StageDependency{{Name: "chunk"}},
-					VectorEmbeddingsGeneratorConfig: &v1alpha1.VectorEmbeddingsGeneratorConfig{},
+					VectorEmbeddingsGeneratorConfig: &v1alpha1.VectorEmbeddingsGeneratorConfig{
+						ModelName: "nomic-ai/nomic-embed-text-v1.5",
+					},
 				},
 				{
 					Name:      "sync",
