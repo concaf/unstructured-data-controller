@@ -216,6 +216,8 @@ type NomicEmbedTextV15Config struct {
 
 // UnstructuredDataPipelineSpec defines the desired state of UnstructuredDataPipeline
 type UnstructuredDataPipelineSpec struct {
+	// +kubebuilder:validation:Required
+	Description string `json:"description"`
 	// +optional
 	SecretRef string `json:"secretRef,omitempty"`
 	// +kubebuilder:validation:MinItems=1
