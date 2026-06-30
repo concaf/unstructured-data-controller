@@ -69,9 +69,8 @@ func TestMain(m *testing.M) {
 				log.Fatalf("Failed to register v1alpha1 scheme: %s", err)
 			}
 
-			kindCluster := kind.NewCluster(kindClusterName)
-
 			if skipClusterSetup != "true" {
+				kindCluster := kind.NewCluster(kindClusterName)
 				log.Printf("Creating new kind cluster with name: %s", kindClusterName)
 				envFuncs := []env.Func{
 					envfuncs.CreateCluster(kindCluster, kindClusterName),

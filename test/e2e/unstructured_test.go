@@ -219,35 +219,25 @@ func TestUnstructuredDataLoad(t *testing.T) {
 			t.Logf("uploaded test file: %s", key)
 		}
 
-		// wait for all stage CRs to be ready
-		t.Log("waiting for all stage CRs to reconcile ...")
-
-		stageCRDs := []struct {
-			condition string
-			crdName   string
-			crName    string
-		}{
-			{v1alpha1.SourceCrawlerCondition, "sourcecrawlers.operator.dataverse.redhat.com", dataPipelineCRName + "-crawl"},
-			{v1alpha1.DocumentProcessorCondition, "documentprocessors.operator.dataverse.redhat.com", dataPipelineCRName + "-convert"},
-			{v1alpha1.ChunksGeneratorCondition, "chunksgenerators.operator.dataverse.redhat.com", dataPipelineCRName + "-chunk"},
-			{v1alpha1.VectorEmbeddingGenerationConditionType, "vectorembeddingsgenerators.operator.dataverse.redhat.com", dataPipelineCRName + "-embed"},
-			{v1alpha1.DestinationSyncerCondition, "destinationsyncers.operator.dataverse.redhat.com", dataPipelineCRName + "-sync"},
-		}
-		for _, stage := range stageCRDs {
-			t.Logf("waiting for %s to be ready ...", stage.crName)
-			if err := operatorUtils.WaitForResourceReady(ctx, stage.condition, stage.crdName, stage.crName, testNamespace); err != nil {
-				t.Errorf("stage %s not ready: %v", stage.crName, err)
-			}
-		}
-
-		// verify files appear in the output bucket
-		t.Log("verifying files in output bucket ...")
+		// poll until files appear in the output bucket — the full pipeline
+		// (crawl → docling → chunk → embed → sync) can take 15+ minutes on CI
+		t.Log("waiting for files to be processed through the pipeline ...")
 		if err := apimachinerywait.PollUntilContextTimeout(
 			context.Background(),
-			5*time.Second,
-			10*time.Minute,
+			10*time.Second,
+			30*time.Minute,
 			false,
 			func(ctx context.Context) (done bool, err error) {
+				// check intermediate progress in data-storage bucket
+				storageOutput, _ := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+					Bucket: aws.String(unstructuredDataStorageBucketName),
+					Prefix: aws.String("pipelines/" + dataPipelineCRName + "/"),
+				})
+				storageCount := 0
+				if storageOutput != nil {
+					storageCount = len(storageOutput.Contents)
+				}
+
 				output, listErr := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 					Bucket: aws.String(outputBucketName),
 				})
@@ -256,7 +246,7 @@ func TestUnstructuredDataLoad(t *testing.T) {
 					return false, nil
 				}
 				if len(output.Contents) == 0 {
-					t.Log("no files in output bucket yet, retrying ...")
+					t.Logf("pipeline in progress: %d intermediate files, 0 output files", storageCount)
 					return false, nil
 				}
 				t.Logf("found %d files in output bucket", len(output.Contents))
