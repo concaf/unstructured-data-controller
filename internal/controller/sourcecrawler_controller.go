@@ -141,6 +141,11 @@ func (r *SourceCrawlerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// determine requeue strategy based on SQS configuration
 	sqsQueueURL := sourceCrawlerConfig.S3Config.SQSQueueURL
 	if sqsQueueURL != "" {
+		_, err := awsclienthandler.NewSQSClientFromConfig(ctx, sourceAWSConfig)
+		if err != nil {
+			logger.Error(err, "failed to initialize SQS client")
+			return r.handleError(ctx, sourceCrawlerCR, err)
+		}
 		return handleSQSWakeUp(ctx, sqsQueueURL, sourceCrawlerConfig.S3Config.Bucket, sourceCrawlerConfig.S3Config.Prefix)
 	}
 	return ctrl.Result{RequeueAfter: defaultCrawlerResyncInterval}, nil
@@ -151,7 +156,7 @@ func handleSQSWakeUp(ctx context.Context, queueURL, bucket, prefix string) (ctrl
 
 	sqsClient, err := awsclienthandler.GetSQSClient()
 	if err != nil {
-		logger.Info("SQS client not initialized yet, will retry", "error", err)
+		logger.Error(err, "failed to initialize SQS client")
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
