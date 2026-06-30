@@ -61,6 +61,8 @@ func GetSQSClient() (*sqs.Client, error) {
 	return SQSClient, nil
 }
 
+const sqsLongPollSeconds = 20
+
 type s3EventMessage struct {
 	Records []s3EventRecord `json:"Records"`
 }
@@ -82,10 +84,10 @@ type s3ObjectInfo struct {
 	Key string `json:"key"`
 }
 
-// DrainSQSQueue receives messages from the queue and deletes only those whose
-// S3 event matches the given bucket and prefix. Unrelated messages are left in
-// the queue for other consumers.
-// Returns true if any matching messages were found (used as a wake-up signal).
+// DrainSQSQueue long-polls SQS (up to 20s per receive) and deletes only
+// messages whose S3 event matches the given bucket and prefix. Unrelated
+// messages are left in the queue for other consumers.
+// Returns true if any matching messages were found.
 func DrainSQSQueue(ctx context.Context, sqsClient *sqs.Client, queueURL, bucket, prefix string) (bool, error) {
 	logger := log.FromContext(ctx)
 	hasMessages := false
@@ -94,7 +96,7 @@ func DrainSQSQueue(ctx context.Context, sqsClient *sqs.Client, queueURL, bucket,
 		output, err := sqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
 			QueueUrl:            aws.String(queueURL),
 			MaxNumberOfMessages: 10,
-			WaitTimeSeconds:     0,
+			WaitTimeSeconds:     sqsLongPollSeconds,
 		})
 		if err != nil {
 			return hasMessages, err
@@ -102,6 +104,7 @@ func DrainSQSQueue(ctx context.Context, sqsClient *sqs.Client, queueURL, bucket,
 		if len(output.Messages) == 0 {
 			break
 		}
+
 		for _, msg := range output.Messages {
 			if msg.Body == nil {
 				continue

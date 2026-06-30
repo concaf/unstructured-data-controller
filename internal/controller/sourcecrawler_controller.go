@@ -41,7 +41,6 @@ import (
 
 const (
 	SourceCrawlerControllerName  = "SourceCrawler"
-	sqsPollInterval              = 15 * time.Second
 	defaultCrawlerResyncInterval = 5 * time.Minute
 )
 
@@ -153,21 +152,23 @@ func handleSQSWakeUp(ctx context.Context, queueURL, bucket, prefix string) (ctrl
 	sqsClient, err := awsclienthandler.GetSQSClient()
 	if err != nil {
 		logger.Info("SQS client not initialized yet, will retry", "error", err)
-		return ctrl.Result{RequeueAfter: sqsPollInterval}, nil
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
+	// DrainSQSQueue long-polls (up to 20s), so it blocks until messages
+	// arrive or the timeout expires — no separate poll interval needed.
 	hasMessages, err := awsclienthandler.DrainSQSQueue(ctx, sqsClient, queueURL, bucket, prefix)
 	if err != nil {
 		logger.Error(err, "failed to drain SQS queue")
-		return ctrl.Result{RequeueAfter: sqsPollInterval}, nil
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	if hasMessages {
 		logger.Info("SQS messages received, requeuing immediately for state diff")
-		return ctrl.Result{Requeue: true}, nil
 	}
 
-	return ctrl.Result{RequeueAfter: sqsPollInterval}, nil
+	// requeue immediately — the long poll inside DrainSQSQueue is the wait
+	return ctrl.Result{Requeue: true}, nil
 }
 
 func (r *SourceCrawlerReconciler) handleError(ctx context.Context, sourceCrawlerCR *operatorv1alpha1.SourceCrawler, err error) (ctrl.Result, error) {
