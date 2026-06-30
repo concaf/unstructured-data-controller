@@ -23,33 +23,33 @@ import (
 // sample spec:
 //
 //	spec:
-//	  stageName: chunk
-//	  dependsOn:
-//	    - name: convert
-//	  config:
-//	    strategy: recursiveCharacterTextSplitter
-//	    recursiveCharacterSplitterConfig:
-//	      chunkSize: 1000
-//	      chunkOverlap: 200
+//	  stageName: crawl                       # this stage's name in the pipeline
+//	  sourceCrawlerConfig:
+//	    type: s3
+//	    s3Config:
+//	      bucket: data-ingestion-bucket
+//	      prefix: documents/
+//	      sqsQueueURL: https://sqs...        # optional, enables real-time S3 notifications
 //	status:
 //	  conditions:
-//	    - type: ChunksGeneratorReady
-//	      status: "True"
+//	    - type: SourceCrawlerReady
+//	      status: "True"                     # True | False | Unknown
 //	      message: successfully reconciled
 
 const (
-	ChunksGeneratorCondition = "ChunksGeneratorReady"
+	SourceCrawlerCondition = "SourceCrawlerReady"
 )
 
-// ChunksGeneratorSpec defines the desired state of ChunksGenerator
-type ChunksGeneratorSpec struct {
-	StageName             string                `json:"stageName,omitempty"`
-	DependsOn             []StageDependency     `json:"dependsOn,omitempty"`
-	ChunksGeneratorConfig ChunksGeneratorConfig `json:"config,omitempty"`
+// SourceCrawlerSpec defines the desired state of SourceCrawler.
+type SourceCrawlerSpec struct {
+	StageName           string              `json:"stageName,omitempty"`
+	SecretRef           string              `json:"secretRef,omitempty"`
+	DependsOn           []StageDependency   `json:"dependsOn,omitempty"`
+	SourceCrawlerConfig SourceCrawlerConfig `json:"sourceCrawlerConfig,omitempty"`
 }
 
-// ChunksGeneratorStatus defines the observed state of ChunksGenerator
-type ChunksGeneratorStatus struct {
+// SourceCrawlerStatus defines the observed state of SourceCrawler.
+type SourceCrawlerStatus struct {
 	LastAppliedGeneration int64              `json:"lastAppliedGeneration,omitempty"`
 	Conditions            []metav1.Condition `json:"conditions,omitempty"`
 	FilesProcessed        int64              `json:"filesProcessed,omitempty"`
@@ -57,38 +57,38 @@ type ChunksGeneratorStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.conditions[?(@.type==\"ChunksGeneratorReady\")].status"
-// +kubebuilder:printcolumn:name="Message",type="string",JSONPath=".status.conditions[?(@.type==\"ChunksGeneratorReady\")].message"
+// +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.conditions[?(@.type==\"SourceCrawlerReady\")].status"
+// +kubebuilder:printcolumn:name="Message",type="string",JSONPath=".status.conditions[?(@.type==\"SourceCrawlerReady\")].message"
 // +kubebuilder:printcolumn:name="Files",type="integer",JSONPath=".status.filesProcessed"
 
-// ChunksGenerator is the Schema for the chunksgenerators API
-type ChunksGenerator struct {
+// SourceCrawler is the Schema for the sourcecrawlers API.
+type SourceCrawler struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   ChunksGeneratorSpec   `json:"spec,omitempty"`
-	Status ChunksGeneratorStatus `json:"status,omitempty"`
+	Spec   SourceCrawlerSpec   `json:"spec,omitempty"`
+	Status SourceCrawlerStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// ChunksGeneratorList contains a list of ChunksGenerator
-type ChunksGeneratorList struct {
+// SourceCrawlerList contains a list of SourceCrawler.
+type SourceCrawlerList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ChunksGenerator `json:"items"`
+	Items           []SourceCrawler `json:"items"`
 }
 
-func (c *ChunksGenerator) GetFilesProcessed() int64 {
+func (c *SourceCrawler) GetFilesProcessed() int64 {
 	return c.Status.FilesProcessed
 }
 
-func (c *ChunksGenerator) SetWaiting() {
+func (c *SourceCrawler) SetWaiting() {
 	condition := metav1.Condition{
-		Type:               ChunksGeneratorCondition,
+		Type:               SourceCrawlerCondition,
 		LastTransitionTime: metav1.Now(),
 		Status:             metav1.ConditionUnknown,
-		Message:            "ChunksGenerator is getting reconciled",
+		Message:            "SourceCrawler is getting reconciled",
 		Reason:             "Waiting",
 	}
 	for i, currentCondition := range c.Status.Conditions {
@@ -100,9 +100,9 @@ func (c *ChunksGenerator) SetWaiting() {
 	c.Status.Conditions = append(c.Status.Conditions, condition)
 }
 
-func (c *ChunksGenerator) UpdateStatus(message string, err error) {
+func (c *SourceCrawler) UpdateStatus(message string, err error) {
 	condition := metav1.Condition{
-		Type:               ChunksGeneratorCondition,
+		Type:               SourceCrawlerCondition,
 		LastTransitionTime: metav1.Now(),
 	}
 	if err == nil {
@@ -126,5 +126,5 @@ func (c *ChunksGenerator) UpdateStatus(message string, err error) {
 }
 
 func init() {
-	SchemeBuilder.Register(&ChunksGenerator{}, &ChunksGeneratorList{})
+	SchemeBuilder.Register(&SourceCrawler{}, &SourceCrawlerList{})
 }

@@ -241,18 +241,25 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "ChunksGenerator")
 		os.Exit(1)
 	}
-	if err := (&controller.SQSInformerReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "SQSInformer")
-		os.Exit(1)
-	}
 	if err := (&controller.VectorEmbeddingsGeneratorReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VectorEmbeddingsGenerator")
+		os.Exit(1)
+	}
+	if err := (&controller.SourceCrawlerReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "SourceCrawler")
+		os.Exit(1)
+	}
+	if err := (&controller.DestinationSyncerReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "DestinationSyncer")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

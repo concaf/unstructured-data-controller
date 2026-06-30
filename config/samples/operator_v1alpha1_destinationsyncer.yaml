@@ -1,0 +1,16 @@
+apiVersion: operator.dataverse.redhat.com/v1alpha1
+kind: DestinationSyncer
+metadata:
+  labels:
+    app.kubernetes.io/name: unstructured-data-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: destinationsyncer-sample
+spec:
+  stageName: sync
+  dependsOn:
+    - name: embed
+  destinationSyncerConfig:
+    type: s3
+    s3DestinationConfig:
+      bucket: output-bucket
+      prefix: processed/

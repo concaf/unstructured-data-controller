@@ -19,12 +19,15 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -32,13 +35,11 @@ import (
 
 	operatorv1alpha1 "github.com/redhat-data-and-ai/unstructured-data-controller/api/v1alpha1"
 	"github.com/redhat-data-and-ai/unstructured-data-controller/internal/controller/controllerutils"
-	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/awsclienthandler"
-	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/filestore"
-	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/unstructured"
 )
 
 const (
 	UnstructuredDataPipelineControllerName = "UnstructuredDataPipeline"
+	PipelineLabel                          = "operator.dataverse.redhat.com/unstructured-data-pipeline"
 )
 
 var (
@@ -49,30 +50,35 @@ var (
 // UnstructuredDataPipelineReconciler reconciles a UnstructuredDataPipeline object
 type UnstructuredDataPipelineReconciler struct {
 	client.Client
-	Scheme    *runtime.Scheme
-	fileStore *filestore.FileStore
+	Scheme *runtime.Scheme
 }
 
 // +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=unstructureddatapipelines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=unstructureddatapipelines/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=unstructureddatapipelines/finalizers,verbs=update
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=sourcecrawlers,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=sourcecrawlers/status,verbs=get
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=documentprocessors,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=documentprocessors/status,verbs=get
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=chunksgenerators,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=chunksgenerators/status,verbs=get
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=vectorembeddingsgenerators,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=vectorembeddingsgenerators/status,verbs=get
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=destinationsyncers,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=destinationsyncers/status,verbs=get
 
 func (r *UnstructuredDataPipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("reconciling", "controller", UnstructuredDataPipelineControllerName)
 
-	// check if config CR is healthy
 	isHealthy, err := IsConfigCRHealthy(ctx, r.Client, req.Namespace)
 	if err != nil {
 		logger.Error(err, "failed to check if ControllerConfig CR is healthy")
 		return ctrl.Result{}, err
 	}
-
 	if !isHealthy {
 		logger.Info("ControllerConfig CR is not ready yet, will try again in a bit ...")
-		return ctrl.Result{
-			RequeueAfter: 10 * time.Second,
-		}, nil
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	unstructuredDataPipelineCR := &operatorv1alpha1.UnstructuredDataPipeline{}
@@ -80,236 +86,270 @@ func (r *UnstructuredDataPipelineReconciler) Reconcile(ctx context.Context, req 
 		logger.Error(err, "failed to get UnstructuredDataPipeline CR")
 		return ctrl.Result{}, err
 	}
-	dataProductName := unstructuredDataPipelineCR.Name
+	// DeepCopy to avoid mutating the shared informer cache
+	unstructuredDataPipelineCR = unstructuredDataPipelineCR.DeepCopy()
 
-	unstructuredDataPipelineKey := client.ObjectKeyFromObject(unstructuredDataPipelineCR)
-	if err := controllerutils.RemoveForceReconcileLabelWithRetry(ctx, r.Client, unstructuredDataPipelineKey,
-		func() client.Object { return &operatorv1alpha1.UnstructuredDataPipeline{} }); err != nil {
-		logger.Error(err, "error removing the force-reconcile label from the UnstructuredDataPipeline CR")
-		return ctrl.Result{}, err
-	}
-
-	if err := controllerutils.StatusPatch(ctx, r.Client, unstructuredDataPipelineCR, func() {
-		unstructuredDataPipelineCR.SetWaiting()
-	}); err != nil {
-		logger.Error(err, "failed to update UnstructuredDataPipeline CR status")
-		return ctrl.Result{}, err
-	}
-
-	// first, let's create (or update) the DocumentProcessor CR for this data product
-	documentProcessorCR := &operatorv1alpha1.DocumentProcessor{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      dataProductName,
-			Namespace: unstructuredDataPipelineCR.Namespace,
-		},
-		Spec: operatorv1alpha1.DocumentProcessorSpec{
-			DataProduct:             dataProductName,
-			DocumentProcessorConfig: unstructuredDataPipelineCR.Spec.DocumentProcessorConfig,
-		},
-	}
-	// result, err := kubecontrollerutil.CreateOrUpdate(ctx, r.Client, documentProcessorCR, func() error { return nil })
-	result, err := controllerutil.CreateOrUpdate(ctx, r.Client, documentProcessorCR, func() error {
-		documentProcessorCR.Spec = operatorv1alpha1.DocumentProcessorSpec{
-			DataProduct:             dataProductName,
-			DocumentProcessorConfig: unstructuredDataPipelineCR.Spec.DocumentProcessorConfig,
+	stages := unstructuredDataPipelineCR.Spec.Stages
+	if err := operatorv1alpha1.ValidateStages(stages); err != nil {
+		logger.Error(err, "invalid pipeline stages")
+		if _, updateErr := r.handleError(ctx, unstructuredDataPipelineCR, fmt.Errorf("invalid pipeline stages: %w", err)); updateErr != nil {
+			logger.Error(updateErr, "failed to update status for validation error")
 		}
-		return nil
-	})
-	if err != nil {
-		logger.Error(err, "failed to create/update DocumentProcessor CR")
-		return r.handleError(ctx, unstructuredDataPipelineCR, err)
-	}
-	logger.Info("DocumentProcessor CR created/updated", "result", result)
-
-	// create ChunksGenerator CR for this data product here
-	chunksGeneratorCR := &operatorv1alpha1.ChunksGenerator{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      dataProductName,
-			Namespace: unstructuredDataPipelineCR.Namespace,
-		},
-		Spec: operatorv1alpha1.ChunksGeneratorSpec{
-			DataProduct:           dataProductName,
-			ChunksGeneratorConfig: unstructuredDataPipelineCR.Spec.ChunksGeneratorConfig,
-		},
-	}
-	result, err = controllerutil.CreateOrUpdate(ctx, r.Client, chunksGeneratorCR, func() error {
-		chunksGeneratorCR.Spec = operatorv1alpha1.ChunksGeneratorSpec{
-			DataProduct:           dataProductName,
-			ChunksGeneratorConfig: unstructuredDataPipelineCR.Spec.ChunksGeneratorConfig,
-		}
-		return nil
-	})
-	if err != nil {
-		logger.Error(err, "failed to create/update ChunksGenerator CR")
-		return r.handleError(ctx, unstructuredDataPipelineCR, err)
-	}
-	logger.Info("ChunksGenerator CR created/updated", "result", result)
-
-	// create vector embeddings generator cr
-	vectorEmbeddingsGeneratorCR := &operatorv1alpha1.VectorEmbeddingsGenerator{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      dataProductName,
-			Namespace: unstructuredDataPipelineCR.Namespace,
-		},
-		Spec: operatorv1alpha1.VectorEmbeddingsGeneratorSpec{
-			DataProduct:                     dataProductName,
-			VectorEmbeddingsGeneratorConfig: unstructuredDataPipelineCR.Spec.VectorEmbeddingsGeneratorConfig,
-		},
+		return ctrl.Result{}, nil
 	}
 
-	result, err = controllerutil.CreateOrUpdate(ctx, r.Client, vectorEmbeddingsGeneratorCR, func() error {
-		vectorEmbeddingsGeneratorCR.Spec = operatorv1alpha1.VectorEmbeddingsGeneratorSpec{
-			DataProduct:                     dataProductName,
-			VectorEmbeddingsGeneratorConfig: unstructuredDataPipelineCR.Spec.VectorEmbeddingsGeneratorConfig,
-		}
-		return nil
-	})
-	if err != nil {
-		logger.Error(err, "failed to create/update VectorEmbeddingsGenerator CR")
-		return r.handleError(ctx, unstructuredDataPipelineCR, err)
-	}
-	logger.Info("VectorEmbeddingsGenerator CR created/updated", "result", result)
-
-	var source unstructured.DataSource
-	switch unstructuredDataPipelineCR.Spec.SourceConfig.Type {
-	case operatorv1alpha1.TypeS3:
-		// read all files from the ingestion bucket and store them in the filestore only if file not exists
-		source = &unstructured.S3BucketSource{
-			Bucket: unstructuredDataPipelineCR.Spec.SourceConfig.S3Config.Bucket,
-			Prefix: unstructuredDataPipelineCR.Spec.SourceConfig.S3Config.Prefix,
-		}
-	default:
-		return r.handleError(ctx, unstructuredDataPipelineCR, fmt.Errorf("unsupported source type: %s", unstructuredDataPipelineCR.Spec.SourceConfig.Type))
-	}
-
-	if !IsControllerConfigGlobalsSet(cacheDirectory, dataStorageBucket) {
-		logger.Info("ControllerConfig has not set cacheDirectory/dataStorageBucket yet, will try again in a bit ...")
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-	}
-	fs, err := filestore.New(ctx, cacheDirectory, dataStorageBucket)
-	if err != nil {
-		if IsAWSClientNotInitializedError(err) {
-			logger.Info("ControllerConfig has not initialized AWS clients yet, will try again in a bit ...")
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		}
-		logger.Error(err, "failed to create filestore")
-		return r.handleError(ctx, unstructuredDataPipelineCR, err)
-	}
-
-	r.fileStore = fs
-
-	// cacheDirectory: /var/data/unstructured/
-	// dataStorageBucket: data-storage-bucket
-
-	// /var/data/unstructured/dataproduct/file1.pdf
-	// /var/data/unstructured/dataproduct/file1.pdf-metadata.json
-	// /var/data/unstructured/dataproduct/file1.pdf-converted.json
-	// /var/data/unstructured/dataproduct/file1.pdf-chunks.json
-	// /var/data/unstructured/dataproduct/file1.pdf-vector-embeddings.json
-
-	// data-storage-bucket/dataproduct/file1.pdf
-	// data-storage-bucket/dataproduct/file1.pdf-metadata.json
-	// data-storage-bucket/dataproduct/file1.pdf-converted.json
-	// data-storage-bucket/dataproduct/file1.pdf-chunks.json
-	// data-storage-bucket/dataproduct/file1.pdf-vector-embeddings.json
-
-	storedFiles, err := source.SyncFilesToFilestore(ctx, r.fileStore)
-	if err != nil {
-		logger.Error(err, "failed to store files to filestore")
-		return r.handleError(ctx, unstructuredDataPipelineCR, err)
-	}
-	logger.Info("successfully stored files to filestore", "files", storedFiles)
-
-	// add force reconcile label to the DocumentProcessor CR
-	documentProcessorKey := client.ObjectKey{
-		Namespace: unstructuredDataPipelineCR.Namespace,
-		Name:      dataProductName,
-	}
-	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		latestDocumentProcessorCR := &operatorv1alpha1.DocumentProcessor{}
-		if getErr := r.Get(ctx, documentProcessorKey, latestDocumentProcessorCR); getErr != nil {
-			return getErr
-		}
-		return controllerutils.AddForceReconcileLabel(ctx, r.Client, latestDocumentProcessorCR)
-	}); err != nil {
-		logger.Error(err, "failed to add force reconcile label to DocumentProcessor CR")
-		return r.handleError(ctx, unstructuredDataPipelineCR, err)
-	}
-
-	// Setup destination
-	var destination unstructured.Destination
-	switch unstructuredDataPipelineCR.Spec.DestinationConfig.Type {
-	case operatorv1alpha1.TypeS3:
-		var err error
-		destination, err = setupS3Destination(unstructuredDataPipelineCR, dataProductName)
-		if err != nil {
-			if IsAWSClientNotInitializedError(err) {
-				logger.Info("ControllerConfig has not initialized destination S3 client yet, will try again in a bit ...")
-				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-			}
+	for _, stage := range stages {
+		if err := r.ensureChildCR(ctx, stage, unstructuredDataPipelineCR); err != nil {
+			logger.Error(err, "failed to ensure child CR", "stage", stage.Name)
 			return r.handleError(ctx, unstructuredDataPipelineCR, err)
 		}
-	default:
-		err := fmt.Errorf("unsupported destination type: %s", unstructuredDataPipelineCR.Spec.DestinationConfig.Type)
-		logger.Error(err, "unsupported destination type")
-		return r.handleError(ctx, unstructuredDataPipelineCR, err)
 	}
 
-	// list all files in the filestore for the data product
-	filePaths, err := r.fileStore.ListFilesInPath(ctx, dataProductName)
-	if err != nil {
-		logger.Error(err, "failed to list files in path")
-		return r.handleError(ctx, unstructuredDataPipelineCR, err)
+	if err := r.deleteOrphanedStageCRs(ctx, stages, unstructuredDataPipelineCR); err != nil {
+		logger.Error(err, "failed to delete orphaned stage CRs")
+		return ctrl.Result{}, err
 	}
-	// extract the vector embeddings files that are to be ingested to destination
-	filterEmbeddingsFiles := unstructured.FilterVectorEmbeddingsFilePaths(filePaths)
-	logger.Info("files to ingest to destination", "files", filterEmbeddingsFiles)
 
-	// ingest the embeddings files to destination
-	if err = destination.SyncFilesToDestination(ctx, r.fileStore, filterEmbeddingsFiles); err != nil {
-		logger.Error(err, "failed to ingest embeddings files to destination")
-		return r.handleError(ctx, unstructuredDataPipelineCR, err)
-	}
-	logger.Info("successfully ingested embeddings files to destination")
-
-	// all done, let's update the status to ready
-	successMessage := fmt.Sprintf("successfully reconciled unstructured data product: %s", dataProductName)
 	if err := controllerutils.StatusPatch(ctx, r.Client, unstructuredDataPipelineCR, func() {
-		unstructuredDataPipelineCR.UpdateStatus(successMessage, nil)
+		unstructuredDataPipelineCR.UpdateStatus("all stage CRs created", nil)
 	}); err != nil {
-		logger.Error(err, "failed to update UnstructuredDataPipeline CR status", "namespace", unstructuredDataPipelineCR.Namespace, "name", unstructuredDataPipelineCR.Name)
-		return r.handleError(ctx, unstructuredDataPipelineCR, err)
+		logger.Error(err, "failed to update pipeline status")
+		return ctrl.Result{}, err
 	}
-	logger.Info("successfully updated UnstructuredDataPipeline CR status", "status", unstructuredDataPipelineCR.Status)
 
-	ctrlResult := ctrl.Result{}
-	if UnstructuredDataPipelineResyncInterval != nil {
-		ctrlResult.RequeueAfter = time.Duration(*UnstructuredDataPipelineResyncInterval) * time.Minute
-	}
-	return ctrlResult, nil
+	return ctrl.Result{}, nil
 }
 
-// setupS3Destination returns an S3 destination for the given CR
-func setupS3Destination(unstructuredDataPipelineCR *operatorv1alpha1.UnstructuredDataPipeline, dataProductName string) (unstructured.Destination, error) {
-	destCfg := unstructuredDataPipelineCR.Spec.DestinationConfig.S3DestinationConfig
-	destinationS3Client, err := awsclienthandler.GetDestinationS3Client()
-	if err != nil {
-		return nil, err
+func (r *UnstructuredDataPipelineReconciler) markStageCreated(ctx context.Context, pipeline *operatorv1alpha1.UnstructuredDataPipeline, stageName string) error {
+	key := client.ObjectKeyFromObject(pipeline)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &operatorv1alpha1.UnstructuredDataPipeline{}
+		if err := r.Get(ctx, key, latest); err != nil {
+			return err
+		}
+		found := false
+		for i := range latest.Status.Stages {
+			if latest.Status.Stages[i].Name == stageName {
+				latest.Status.Stages[i].Created = true
+				found = true
+				break
+			}
+		}
+		if !found {
+			latest.Status.Stages = append(latest.Status.Stages, operatorv1alpha1.StageCreationStatus{
+				Name:    stageName,
+				Created: true,
+			})
+		}
+		return r.Status().Update(ctx, latest)
+	})
+}
+
+func (r *UnstructuredDataPipelineReconciler) deleteOrphanedStageCRs(ctx context.Context, stages []operatorv1alpha1.PipelineStage, pipeline *operatorv1alpha1.UnstructuredDataPipeline) error {
+	logger := log.FromContext(ctx)
+	listOpts := []client.ListOption{
+		client.InNamespace(pipeline.Namespace),
+		client.MatchingLabels{PipelineLabel: pipeline.Name},
 	}
-	return &unstructured.S3Destination{
-		S3Client:        destinationS3Client,
-		Bucket:          destCfg.Bucket,
-		Prefix:          destCfg.Prefix,
-		DataProductName: dataProductName,
-	}, nil
+
+	// 1. expected stage CRs grouped by type; {SourceCrawler: ["pipeline-crawl"], DocumentProcessor: ["pipeline-convert"] ...}
+	expectedStages := map[operatorv1alpha1.StageType][]string{}
+	for _, stage := range stages {
+		expectedStages[stage.Type] = append(expectedStages[stage.Type], childCRName(pipeline, stage.Name))
+	}
+
+	// 2. list all current stage CRs for this pipeline, grouped by type
+	currentStages := map[operatorv1alpha1.StageType][]string{}
+	for _, stg := range operatorv1alpha1.ListStages() {
+		if err := r.List(ctx, stg.ObjectList, listOpts...); err != nil {
+			return err
+		}
+		if err := meta.EachListItem(stg.ObjectList, func(obj runtime.Object) error {
+			accessor, err := meta.Accessor(obj)
+			if err != nil {
+				return err
+			}
+			currentStages[stg.Type] = append(currentStages[stg.Type], accessor.GetName())
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+
+	// 3. for each type, find names not in expected — those are orphans
+	// 4. delete orphans
+	for stageType, currentNames := range currentStages {
+		for _, name := range currentNames {
+			if !slices.Contains(expectedStages[stageType], name) {
+				logger.Info("deleting orphaned stage CR", "name", name)
+				for _, reg := range operatorv1alpha1.ListStages() {
+					if reg.Type == stageType {
+						reg.Object.SetName(name)
+						reg.Object.SetNamespace(pipeline.Namespace)
+						if err := r.Delete(ctx, reg.Object); err != nil {
+							return fmt.Errorf("failed to delete orphaned CR %s: %w", name, err)
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// sync status.stages to match current spec
+	activeStages := map[string]bool{}
+	for _, stage := range stages {
+		activeStages[stage.Name] = true
+	}
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &operatorv1alpha1.UnstructuredDataPipeline{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(pipeline), latest); err != nil {
+			return err
+		}
+		filtered := make([]operatorv1alpha1.StageCreationStatus, 0, len(latest.Status.Stages))
+		for _, s := range latest.Status.Stages {
+			if activeStages[s.Name] {
+				filtered = append(filtered, s)
+			}
+		}
+		latest.Status.Stages = filtered
+		return r.Status().Update(ctx, latest)
+	})
+}
+
+func childCRName(unstructuredDataPipelineCR *operatorv1alpha1.UnstructuredDataPipeline, stageName string) string {
+	return unstructuredDataPipelineCR.Name + "-" + stageName
+}
+
+func (r *UnstructuredDataPipelineReconciler) ensureChildCR(ctx context.Context, stage operatorv1alpha1.PipelineStage, unstructuredDataPipelineCR *operatorv1alpha1.UnstructuredDataPipeline) error {
+	logger := log.FromContext(ctx)
+	crName := childCRName(unstructuredDataPipelineCR, stage.Name)
+	deps := stage.DependsOn
+
+	switch stage.Type {
+	case operatorv1alpha1.StageTypeSourceCrawler:
+		cr := &operatorv1alpha1.SourceCrawler{
+			ObjectMeta: metav1.ObjectMeta{Name: crName, Namespace: unstructuredDataPipelineCR.Namespace},
+		}
+		result, err := controllerutil.CreateOrUpdate(ctx, r.Client, cr, func() error {
+			if cr.Labels == nil {
+				cr.Labels = make(map[string]string)
+			}
+			cr.Labels[PipelineLabel] = unstructuredDataPipelineCR.Name
+			cr.Spec = operatorv1alpha1.SourceCrawlerSpec{
+				StageName:           stage.Name,
+				SecretRef:           unstructuredDataPipelineCR.Spec.SecretRef,
+				DependsOn:           deps,
+				SourceCrawlerConfig: *stage.SourceCrawlerConfig,
+			}
+			return controllerutil.SetControllerReference(unstructuredDataPipelineCR, cr, r.Scheme)
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create/update SourceCrawler CR: %w", err)
+		}
+		logger.Info("SourceCrawler CR created/updated", "name", crName, "result", result)
+
+	case operatorv1alpha1.StageTypeDocumentProcessor:
+		cr := &operatorv1alpha1.DocumentProcessor{
+			ObjectMeta: metav1.ObjectMeta{Name: crName, Namespace: unstructuredDataPipelineCR.Namespace},
+		}
+		result, err := controllerutil.CreateOrUpdate(ctx, r.Client, cr, func() error {
+			if cr.Labels == nil {
+				cr.Labels = make(map[string]string)
+			}
+			cr.Labels[PipelineLabel] = unstructuredDataPipelineCR.Name
+			cr.Spec = operatorv1alpha1.DocumentProcessorSpec{
+				StageName:               stage.Name,
+				DependsOn:               deps,
+				DocumentProcessorConfig: *stage.DocumentProcessorConfig,
+			}
+			return controllerutil.SetControllerReference(unstructuredDataPipelineCR, cr, r.Scheme)
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create/update DocumentProcessor CR: %w", err)
+		}
+		logger.Info("DocumentProcessor CR created/updated", "name", crName, "result", result)
+
+	case operatorv1alpha1.StageTypeChunksGenerator:
+		cr := &operatorv1alpha1.ChunksGenerator{
+			ObjectMeta: metav1.ObjectMeta{Name: crName, Namespace: unstructuredDataPipelineCR.Namespace},
+		}
+		result, err := controllerutil.CreateOrUpdate(ctx, r.Client, cr, func() error {
+			if cr.Labels == nil {
+				cr.Labels = make(map[string]string)
+			}
+			cr.Labels[PipelineLabel] = unstructuredDataPipelineCR.Name
+			cr.Spec = operatorv1alpha1.ChunksGeneratorSpec{
+				StageName:             stage.Name,
+				DependsOn:             deps,
+				ChunksGeneratorConfig: *stage.ChunksGeneratorConfig,
+			}
+			return controllerutil.SetControllerReference(unstructuredDataPipelineCR, cr, r.Scheme)
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create/update ChunksGenerator CR: %w", err)
+		}
+		logger.Info("ChunksGenerator CR created/updated", "name", crName, "result", result)
+
+	case operatorv1alpha1.StageTypeVectorEmbeddingsGenerator:
+		cr := &operatorv1alpha1.VectorEmbeddingsGenerator{
+			ObjectMeta: metav1.ObjectMeta{Name: crName, Namespace: unstructuredDataPipelineCR.Namespace},
+		}
+		result, err := controllerutil.CreateOrUpdate(ctx, r.Client, cr, func() error {
+			if cr.Labels == nil {
+				cr.Labels = make(map[string]string)
+			}
+			cr.Labels[PipelineLabel] = unstructuredDataPipelineCR.Name
+			cr.Spec = operatorv1alpha1.VectorEmbeddingsGeneratorSpec{
+				StageName:                       stage.Name,
+				DependsOn:                       deps,
+				VectorEmbeddingsGeneratorConfig: *stage.VectorEmbeddingsGeneratorConfig,
+			}
+			return controllerutil.SetControllerReference(unstructuredDataPipelineCR, cr, r.Scheme)
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create/update VectorEmbeddingsGenerator CR: %w", err)
+		}
+		logger.Info("VectorEmbeddingsGenerator CR created/updated", "name", crName, "result", result)
+
+	case operatorv1alpha1.StageTypeDestinationSyncer:
+		cr := &operatorv1alpha1.DestinationSyncer{
+			ObjectMeta: metav1.ObjectMeta{Name: crName, Namespace: unstructuredDataPipelineCR.Namespace},
+		}
+		result, err := controllerutil.CreateOrUpdate(ctx, r.Client, cr, func() error {
+			if cr.Labels == nil {
+				cr.Labels = make(map[string]string)
+			}
+			cr.Labels[PipelineLabel] = unstructuredDataPipelineCR.Name
+			cr.Spec = operatorv1alpha1.DestinationSyncerSpec{
+				StageName:               stage.Name,
+				SecretRef:               unstructuredDataPipelineCR.Spec.SecretRef,
+				DependsOn:               deps,
+				DestinationSyncerConfig: *stage.DestinationSyncerConfig,
+			}
+			return controllerutil.SetControllerReference(unstructuredDataPipelineCR, cr, r.Scheme)
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create/update DestinationSyncer CR: %w", err)
+		}
+		logger.Info("DestinationSyncer CR created/updated", "name", crName, "result", result)
+
+	default:
+		return fmt.Errorf("unknown stage type: %s", stage.Type)
+	}
+
+	return r.markStageCreated(ctx, unstructuredDataPipelineCR, stage.Name)
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *UnstructuredDataPipelineReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	labelPredicate := controllerutils.ForceReconcilePredicate()
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&operatorv1alpha1.UnstructuredDataPipeline{}).
-		WithEventFilter(predicate.Or(predicate.GenerationChangedPredicate{}, labelPredicate)).
+		For(&operatorv1alpha1.UnstructuredDataPipeline{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&operatorv1alpha1.SourceCrawler{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&operatorv1alpha1.DocumentProcessor{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&operatorv1alpha1.ChunksGenerator{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&operatorv1alpha1.VectorEmbeddingsGenerator{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&operatorv1alpha1.DestinationSyncer{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Complete(r)
 }
 

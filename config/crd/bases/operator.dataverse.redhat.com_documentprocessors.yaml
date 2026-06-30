@@ -21,6 +21,9 @@ spec:
     - jsonPath: .status.conditions[?(@.type=="DocumentProcessorReady")].message
       name: Message
       type: string
+    - jsonPath: .status.filesProcessed
+      name: Files
+      type: integer
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -80,7 +83,17 @@ spec:
                   type:
                     type: string
                 type: object
-              dataProduct:
+              dependsOn:
+                items:
+                  description: StageDependency identifies an upstream stage by name.
+                  properties:
+                    name:
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              stageName:
                 type: string
             type: object
           status:
@@ -142,6 +155,9 @@ spec:
                   - type
                   type: object
                 type: array
+              filesProcessed:
+                format: int64
+                type: integer
               jobs:
                 items:
                   properties:

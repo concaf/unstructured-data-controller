@@ -1,23 +1,18 @@
 # Unstructured Data Controller with LocalStack
 
-Simple guide to get the Unstructured Data Controller up and running. This guide walks you through setting up a ControllerConfig using [LocalStack](https://localstack.cloud/) for local development and testing.
-
-The ControllerConfig supplies the controller with AWS credentials, the name of the S3 ingestion bucket, and docling configuration.
+Simple guide to get the Unstructured Data Controller up and running using [LocalStack](https://localstack.cloud/) for local development and testing.
 
 ## Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) (or Podman with Docker socket)
 - Kubernetes cluster (or Kind for local dev)
-- [AWS CLI](https://aws.amazon.com/cli/) with [awslocal](https://github.com/localstack/awscli-local) (or configure AWS CLI to target LocalStack)
+- [AWS CLI](https://aws.amazon.com/cli/) with [awslocal](https://github.com/localstack/awscli-local)
 - [Docling-server](https://github.com/docling-project/docling-serve) using `pip install "docling-serve[ui]"`
-- [Ollama](https://ollama.com/) using instructions [here](https://ollama.com/download)
+- [Ollama](https://ollama.com/) for embedding models
 - `kubectl` and access to a Kubernetes cluster where the unstructured-data-controller is deployed
-- Hosted/local docling url
-- **Unstructured secret and ControllerConfig:** The controller uses AWS credentials and the ingestion bucket. If you have not created localstack, follow [Setup LocalStack](setup-localstack.md) first, then continue with this guide.
+- **LocalStack setup:** Follow [Setup LocalStack](setup-localstack.md) first if you haven't already.
 
 ### 1. Create Namespace
-
-Run kind cluster locally and create namespace
 
 ```bash
 kubectl create namespace unstructured-controller-namespace
@@ -25,42 +20,33 @@ kubectl create namespace unstructured-controller-namespace
 
 ## 2. Run docling locally
 
-Run docling serve locally if you dont have or want to use hosted docling url
-
 ```bash
 docling-serve run --enable-ui
 ```
 
 ## 3. Run Ollama locally
 
-Run ollama locally, pull the required models
-
 ```bash
 ollama serve
-
 ollama pull nomic-embed-text:latest
-
 ollama cp nomic-embed-text:latest nomic-ai/nomic-embed-text-v1.5
 ```
 
-### 4. Create the Unstructured secret
+### 4. Create secrets
 
-The controller reads AWS credentials, endpoint, and docling key from a Kubernetes secret. A sample secret is provided in `test/resources/unstructured/unstructured-secret.yaml` with the following keys:
-
-Specify the docling user key if required and local stack details
+The controller and pipeline stages each reference their own secrets. Create them:
 
 ```bash
-kubectl apply -f test/resources/unstructured/unstructured-secret.yaml -n unstructured-controller-namespace
+kubectl apply -f config/samples/unstructured-secret.yaml -n unstructured-controller-namespace
 ```
 
-Edit `test/resources/unstructured/unstructured-secret.yaml` if you need different values (e.g. real AWS credentials or a different endpoint). For real AWS, you can remove or leave empty `AWS_SESSION_TOKEN` and omit `AWS_ENDPOINT`.
+This creates:
+- `operator-secret` — filestore S3 credentials + docling key (used by ControllerConfig)
+- `source-aws-creds` — source S3 credentials (used by SourceCrawler)
+- `dest-aws-creds` — destination S3 credentials (used by DestinationSyncer)
+- `embedding-api-creds` — embedding model endpoint + API key (used by VectorEmbeddingsGenerator)
 
-**In-cluster access to LocalStack:** If the controller runs inside the cluster, `localhost` from the pod will not reach LocalStack on your machine. In `unstructured-secret.yaml`, set `AWS_ENDPOINT` to a URL reachable from the cluster, for example:
-
-- Linux: `http://host.docker.internal:4566` (if the cluster allows it)
-- Or your host machine’s IP and port 4566, or a port-forward to the LocalStack port
-
-### 5. Setup local cache directory or provide bucket url for local cache
+### 5. Setup local cache directory
 
 ```bash
 mkdir -p tmp/cache/
@@ -68,92 +54,44 @@ mkdir -p tmp/cache/
 
 ### 6. Deploy Controller
 
-**Install CRD:**
 ```bash
-make install
+make install  # install CRDs
+make run      # run controller locally
 ```
 
-**Run Controller (local dev):**
-```bash
-make run
-```
+## 7. Create the ControllerConfig
 
-## 7. Create the ControllerConfig custom resource
-
-Create the ControllerConfig CR so the controller can use the unstructured secret and ingestion bucket name. The bucket name in the CR must match the bucket you created in localstack.
-
-Example (from the sample manifest):
-
-```yaml
-apiVersion: operator.dataverse.redhat.com/v1alpha1
-kind: ControllerConfig
-metadata:
-  labels:
-    app.kubernetes.io/name: unstructured-data-controller
-    app.kubernetes.io/managed-by: kustomize
-  name: controllerconfig-sample
-spec:
-  unstructuredSecret: unstructured-secret
-  unstructuredDataProcessingConfig:
-    ingestionBucket: data-ingestion-bucket
-    dataStorageBucket: data-storage-bucket
-    doclingServeURL: "http://localhost:5001"
-    cacheDirectory: "tmp/cache/"
-    maxConcurrentDoclingTasks: 5
-    maxConcurrentLangchainTasks: 10
-    unstructuredDataPipelineResyncInterval: 5  # Optional: resync interval in minutes
-```
-
-### Configuration Fields
-
-- **unstructuredDataPipelineResyncInterval** (optional): Specifies how often (in minutes) the controller should requeue and resync UnstructuredDataPipeline resources to check for new files in the ingestion bucket.
-  - If not specified, the controller will not automatically requeue.
-  - Useful when you want periodic polling for new files independent of SQS notifications.
-  - Example: Setting it to `5` will check for new files every 5 minutes.
-
-Apply the sample or your own manifest (use the same namespace where you created the secret):
+The ControllerConfig sets up operator-level infrastructure (filestore, docling, concurrency limits):
 
 ```bash
 kubectl apply -f config/samples/operator_v1alpha1_controllerconfig.yaml -n unstructured-controller-namespace
 ```
 
-## 8. Create the SQSInformer custom resource
-
-Create the SQSInformer CR so the controller can consume messages from the queue. The queue URL must match the one used with LocalStack (same region and host).
-
-Example (from the sample manifest):
-
-```yaml
-apiVersion: operator.dataverse.redhat.com/v1alpha1
-kind: SQSInformer
-metadata:
-  labels:
-    app.kubernetes.io/name: unstructured-data-controller
-    app.kubernetes.io/managed-by: kustomize
-  name: sqsinformer-sample
-spec:
-  queueURL: http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/unstructured-s3-queue
-```
-
-Apply the sample or your own manifest:
+Verify it's healthy:
 
 ```bash
-kubectl apply -f config/samples/operator_v1alpha1_sqsinformer.yaml
+kubectl get controllerconfig controllerconfig -o yaml
 ```
+
+The status should show `ConfigReady` with `status: "True"`.
+
+## 8. Create the UnstructuredDataPipeline
+
+```bash
+kubectl apply -f config/samples/operator_v1alpha1_unstructureddatapipeline.yaml -n unstructured-controller-namespace
+```
+
+This creates the pipeline and all stage CRs automatically. Each stage watches its upstream dependencies and processes files as they appear.
 
 ## Verifying
 
-- **Controller**: Ensure the controller is running and check its logs for reconciliation of the SQSInformer.
-- **CR status**: Inspect the SQSInformer status:
+Check pipeline and stage statuses:
 
-  ```bash
-  kubectl get controllerconfig controllerconfig-sample -o yaml
-  ```
-
-  The status should show `ConfigReady` with condition `status: "True"` and message "Config is healthy" when reconciliation succeeds.
-
-  ```bash
-  kubectl get sqsinformer sqsinformer-sample -o yaml
-  ```
-
-  The status should show `SQSInformerReady` with condition `status: "True"` when reconciliation succeeds.
+```bash
+kubectl get unstructureddatapipeline -o wide
+kubectl get sourcecrawler -o wide
+kubectl get documentprocessor -o wide
+kubectl get chunksgenerator -o wide
+kubectl get vectorembeddingsgenerator -o wide
+kubectl get destinationsyncer -o wide
+```

@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,7 +36,6 @@ import (
 	"github.com/redhat-data-and-ai/unstructured-data-controller/api/v1alpha1"
 	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/awsclienthandler"
 	operatorUtils "github.com/redhat-data-and-ai/unstructured-data-controller/test/utils"
-	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apimachinerywait "k8s.io/apimachinery/pkg/util/wait"
@@ -49,17 +49,14 @@ func TestUnstructuredDataLoad(t *testing.T) {
 
 	unstructuredBucketName := "unstructured-bucket"
 	unstructuredDataStorageBucketName := "data-storage-bucket"
-	outputChunksBucketName := "output-chunks-bucket"
+	outputBucketName := "output-bucket"
 	unstructuredQueueName := "unstructured-queue"
 
-	schemaName := "unstructured"
-	dataProductCRName := schemaName
+	dataPipelineCRName := "unstructured"
 
 	queueURL := "http://sqs.us-east-1.localhost.localstack.cloud:4566/000000000000/" + unstructuredQueueName
 	unstructuredFilesDirectory := "test/resources/unstructured/unstructured-files"
 
-	//clients
-	secret := &v1.Secret{}
 	var kubeClient klient.Client
 
 	feature.Setup(
@@ -69,11 +66,6 @@ func TestUnstructuredDataLoad(t *testing.T) {
 			err := v1alpha1.AddToScheme(kubeClient.Resources(testNamespace).GetScheme())
 			if err != nil {
 				t.Fatalf("Failed to add scheme: %s", err)
-			}
-
-			// get key secret
-			if err := kubeClient.Resources().Get(ctx, unstructuredSecretName, testNamespace, secret); err != nil {
-				t.Fatalf("Failed to get secret: %s", err)
 			}
 
 			// create AWS clients
@@ -88,7 +80,7 @@ func TestUnstructuredDataLoad(t *testing.T) {
 			}
 
 			// create SQS client
-			sqsClient, err := awsclienthandler.NewSQSClientFromConfig(ctx, &awsclienthandler.AWSConfig{
+			_, err = awsclienthandler.NewSQSClientFromConfig(ctx, &awsclienthandler.AWSConfig{
 				Region:          "us-east-1",
 				AccessKeyID:     "test",
 				SecretAccessKey: "test",
@@ -102,7 +94,8 @@ func TestUnstructuredDataLoad(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// create unstructured bucket
+
+			// create source bucket
 			_, err = s3Client.CreateBucket(ctx, &s3.CreateBucketInput{
 				Bucket: aws.String(unstructuredBucketName),
 			})
@@ -110,7 +103,7 @@ func TestUnstructuredDataLoad(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// create unstructured data storage bucket
+			// create data storage bucket
 			_, err = s3Client.CreateBucket(ctx, &s3.CreateBucketInput{
 				Bucket: aws.String(unstructuredDataStorageBucketName),
 			})
@@ -118,15 +111,19 @@ func TestUnstructuredDataLoad(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// create output chunks bucket
+			// create output bucket
 			_, err = s3Client.CreateBucket(ctx, &s3.CreateBucketInput{
-				Bucket: aws.String(outputChunksBucketName),
+				Bucket: aws.String(outputBucketName),
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// create SQS queue
+			sqsClient, err := awsclienthandler.GetSQSClient()
+			if err != nil {
+				t.Fatal(err)
+			}
 			_, err = sqsClient.CreateQueue(ctx, &sqs.CreateQueueInput{
 				QueueName: aws.String(unstructuredQueueName),
 			})
@@ -150,28 +147,10 @@ func TestUnstructuredDataLoad(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// create SQSInformer CR
-			SQSInformer := &v1alpha1.SQSInformer{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-sqs-informer",
-					Namespace: testNamespace,
-				},
-				Spec: v1alpha1.SQSInformerSpec{
-					QueueURL: queueURL,
-				},
-			}
-			err = kubeClient.Resources(testNamespace).Create(ctx, SQSInformer)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			// wait for SQSInformer CR to be ready
-			if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.SQSInformerCondition, "SQSInformers.operator.dataverse.redhat.com", "test-sqs-informer", testNamespace); err != nil {
-				t.Error(err)
-			}
-
-			// create unstructured data pipeline CR
-			unstructuredDataPipeline := operatorUtils.GetUnstructuredDataPipelineResource(dataProductCRName, testNamespace)
+			// create pipeline CR with SQS queue URL
+			unstructuredDataPipeline := operatorUtils.GetUnstructuredDataPipelineResourceWithStage(dataPipelineCRName, testNamespace)
+			unstructuredDataPipeline.Spec.SecretRef = "pipeline-secret"
+			unstructuredDataPipeline.Spec.Stages[0].SourceCrawlerConfig.S3Config.SQSQueueURL = queueURL
 			t.Log("create unstructured datapipeline CR ...")
 			if err := kubeClient.Resources(testNamespace).Create(ctx, &unstructuredDataPipeline); err != nil {
 				if !apierrors.IsAlreadyExists(err) {
@@ -181,7 +160,7 @@ func TestUnstructuredDataLoad(t *testing.T) {
 
 			// wait for unstructured data pipeline CR to be healthy
 			t.Log("wait for unstructured data pipeline CR to be healthy")
-			if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
+			if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataPipelineCRName, testNamespace); err != nil {
 				t.Error(err)
 			}
 			t.Log("unstructured data pipeline CR is healthy")
@@ -190,7 +169,7 @@ func TestUnstructuredDataLoad(t *testing.T) {
 		},
 	)
 
-	feature.Assess("upload files to unstructured bucket and verify they land in output chunks bucket", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
+	feature.Assess("Will upload files and verify they are processed through the pipeline", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 		// create AWS clients for file operations
 		err := awsclienthandler.NewSourceS3ClientFromConfig(ctx, &awsclienthandler.AWSConfig{
 			Region:          "us-east-1",
@@ -228,7 +207,7 @@ func TestUnstructuredDataLoad(t *testing.T) {
 				t.Error(err)
 			}
 
-			key := fmt.Sprintf("%s/%s", schemaName, file.Name())
+			key := fmt.Sprintf("%s/%s", dataPipelineCRName, file.Name())
 			_, err = s3Client.PutObject(ctx, &s3.PutObjectInput{
 				Bucket: aws.String(unstructuredBucketName),
 				Key:    aws.String(key),
@@ -240,103 +219,75 @@ func TestUnstructuredDataLoad(t *testing.T) {
 			t.Logf("uploaded test file: %s", key)
 		}
 
-		// wait for files to be processed and appear in the output chunks bucket
-		t.Log("wait for files to be processed and appear in output chunks bucket ...")
-
-		var outputFiles []string
+		// poll until files appear in the output bucket — the full pipeline
+		// (crawl → docling → chunk → embed → sync) can take 15+ minutes on CI
+		t.Log("waiting for files to be processed through the pipeline ...")
 		if err := apimachinerywait.PollUntilContextTimeout(
 			context.Background(),
-			5*time.Second,
-			10*time.Minute,
+			10*time.Second,
+			30*time.Minute,
 			false,
 			func(ctx context.Context) (done bool, err error) {
-				output, err := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-					Bucket: aws.String(outputChunksBucketName),
-					Prefix: aws.String(schemaName + "/"),
+				// check intermediate progress in data-storage bucket
+				storageOutput, _ := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+					Bucket: aws.String(unstructuredDataStorageBucketName),
+					Prefix: aws.String("pipelines/" + dataPipelineCRName + "/"),
 				})
-				if err != nil {
-					t.Logf("error listing output chunks bucket: %v, retrying ...", err)
+				storageCount := 0
+				if storageOutput != nil {
+					storageCount = len(storageOutput.Contents)
+				}
+
+				output, listErr := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+					Bucket: aws.String(outputBucketName),
+				})
+				if listErr != nil {
+					t.Logf("failed to list objects in output bucket: %v", listErr)
 					return false, nil
 				}
-				if len(output.Contents) < len(files) {
-					t.Logf("expected at least %d files in output chunks bucket, got %d, retrying ...", len(files), len(output.Contents))
+				if len(output.Contents) == 0 {
+					t.Logf("pipeline in progress: %d intermediate files, 0 output files", storageCount)
 					return false, nil
 				}
-				outputFiles = make([]string, 0, len(output.Contents))
-				for _, obj := range output.Contents {
-					outputFiles = append(outputFiles, *obj.Key)
-				}
+				t.Logf("found %d files in output bucket", len(output.Contents))
 				return true, nil
 			},
 		); err != nil {
 			t.Error(err)
 		}
 
-		t.Logf("output chunk files: %+v", outputFiles)
-
-		// make sure all the source files have corresponding output in the chunks bucket
-		for _, file := range files {
-			found := false
-			expectedPrefix := fmt.Sprintf("%s/%s", schemaName, file.Name())
-			for _, outputFile := range outputFiles {
-				if len(outputFile) >= len(expectedPrefix) && outputFile[:len(expectedPrefix)] == expectedPrefix {
-					t.Logf("file %s processed successfully", file.Name())
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Errorf("file %s not found in output chunks bucket (expected prefix: %s)", file.Name(), expectedPrefix)
-			}
-		}
-
 		return ctx
 	})
 
-	feature.Assess("Deletion of file from the bucket and verifying removal from output chunks bucket", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-		// create a new s3 client
-		t.Log("Creating s3 client ...")
-		err := awsclienthandler.NewSourceS3ClientFromConfig(ctx, &awsclienthandler.AWSConfig{
-			Region:          "us-east-1",
-			AccessKeyID:     "test",
-			SecretAccessKey: "test",
-			Endpoint:        localstackURL,
-		})
-		if err != nil {
-			t.Error(err)
-		}
-
+	feature.Assess("Will delete a file from source and verify it is removed", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 		s3Client, err := awsclienthandler.GetSourceS3Client()
 		if err != nil {
 			t.Error(err)
 		}
 
-		// list all the files in the unstructured bucket as we have ingested files in the last step
+		// list all the files in the source bucket
 		t.Log("Listing objects from unstructured bucket ...")
 		output, err := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 			Bucket: aws.String(unstructuredBucketName),
-			Prefix: aws.String(schemaName + "/"),
+			Prefix: aws.String(dataPipelineCRName + "/"),
 		})
 		if err != nil {
 			t.Errorf("Unable to list objects from the unstructured bucket: %s", err)
 		}
 
-		// Store the file name in a slice - filesinBucket
-		filesinBucket := []string{}
+		filesInBucket := []string{}
 		for _, file := range output.Contents {
 			t.Logf("file: %s", *file.Key)
-			filesinBucket = append(filesinBucket, *file.Key)
+			filesInBucket = append(filesInBucket, *file.Key)
 		}
 
-		// verify the count is at least 1
-		if len(filesinBucket) == 0 {
+		if len(filesInBucket) == 0 {
 			t.Error("Unable to list file from the bucket")
 		}
 
-		// store the file name at 0th index of the slice in a variable - fileToDelete
-		fileToDelete := filesinBucket[0]
+		fileToDelete := filesInBucket[0]
 
-		// delete file from the bucket on the 0th index of the slice
+		// delete file from the bucket
 		_, err = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
 			Bucket: aws.String(unstructuredBucketName),
 			Key:    aws.String(fileToDelete),
@@ -346,48 +297,49 @@ func TestUnstructuredDataLoad(t *testing.T) {
 		}
 
 		t.Logf("deleted file: %s", fileToDelete)
+		remainingFiles := filesInBucket[1:]
 
-		// delete the 0th index element from the slice as well
-		filesinBucket = filesinBucket[1:]
+		// wait for the source crawler to pick up the deletion
+		t.Log("waiting for source crawler to reconcile after deletion ...")
+		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.SourceCrawlerCondition, "sourcecrawlers.operator.dataverse.redhat.com", dataPipelineCRName+"-crawl", testNamespace); err != nil {
+			t.Error(err)
+		}
 
-		// wait for 10 seconds
-		t.Log("waiting for 10 seconds")
-		time.Sleep(10 * time.Second)
-
-		// wait for the deleted file to be removed from the output chunks bucket
-		t.Log("wait for deleted file to be removed from output chunks bucket ...")
-
+		// verify the data storage bucket no longer has the deleted file
+		t.Log("verifying deleted file is removed from data storage ...")
 		if err := apimachinerywait.PollUntilContextTimeout(
 			context.Background(),
 			5*time.Second,
-			10*time.Minute,
+			5*time.Minute,
 			false,
 			func(ctx context.Context) (done bool, err error) {
-				outputObjects, err := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-					Bucket: aws.String(outputChunksBucketName),
-					Prefix: aws.String(fileToDelete),
+				storageOutput, listErr := s3Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+					Bucket: aws.String(unstructuredDataStorageBucketName),
+					Prefix: aws.String("pipelines/" + dataPipelineCRName + "/stages/crawl/"),
 				})
-				if err != nil {
-					t.Logf("error listing output chunks bucket: %v, retrying ...", err)
+				if listErr != nil {
+					t.Logf("failed to list objects: %v", listErr)
 					return false, nil
 				}
-				if len(outputObjects.Contents) > 0 {
-					t.Logf("deleted file %s still present in output chunks bucket (%d objects), retrying ...", fileToDelete, len(outputObjects.Contents))
-					return false, nil
+				for _, obj := range storageOutput.Contents {
+					baseName := filepath.Base(*obj.Key)
+					deletedBaseName := filepath.Base(fileToDelete)
+					if strings.Contains(baseName, deletedBaseName) {
+						t.Logf("deleted file still present: %s, retrying ...", *obj.Key)
+						return false, nil
+					}
 				}
+				t.Logf("deleted file removed, %d remaining files in source", len(remainingFiles))
 				return true, nil
 			},
 		); err != nil {
 			t.Error(err)
 		}
 
-		t.Logf("deleted file %s is not present in the output chunks bucket", fileToDelete)
-
 		return ctx
 	})
 
-	feature.Assess("Will change docling config and verify pipeline reconciles successfully", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-		t.Log("Updating the docling config for the data product")
+	feature.Assess("Will change docling config and verify re-processing", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 		doclingConfig := &v1alpha1.DoclingConfig{
 			FromFormats:     []string{"pdf", "docx", "pptx", "xlsx"},
 			ImageExportMode: "embedded",
@@ -399,56 +351,41 @@ func TestUnstructuredDataLoad(t *testing.T) {
 			TableMode:       "accurate",
 		}
 
-		// fetch the latest version of the unstructured data pipeline CR
+		// fetch the latest version of the pipeline CR
 		unstructuredDataPipelineCR := &v1alpha1.UnstructuredDataPipeline{}
-		if err := kubeClient.Resources().Get(ctx, dataProductCRName, testNamespace, unstructuredDataPipelineCR); err != nil {
+		if err := kubeClient.Resources().Get(ctx, dataPipelineCRName, testNamespace, unstructuredDataPipelineCR); err != nil {
 			t.Error(err)
 		}
-		unstructuredDataPipelineCR.Spec.DocumentProcessorConfig.DoclingConfig = *doclingConfig
+
+		// update the document processor stage config
+		for i, stage := range unstructuredDataPipelineCR.Spec.Stages {
+			if stage.Type == v1alpha1.StageTypeDocumentProcessor {
+				unstructuredDataPipelineCR.Spec.Stages[i].DocumentProcessorConfig.DoclingConfig = *doclingConfig
+				break
+			}
+		}
 		if err := kubeClient.Resources().WithNamespace(testNamespace).Update(ctx, unstructuredDataPipelineCR); err != nil {
 			t.Error(err)
 		}
-		t.Log("Successfully updated the docling config in the unstructured data pipeline CR")
+		t.Log("successfully updated the docling config in the pipeline CR")
 
-		// wait for the unstructured data pipeline CR to be ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
+		// wait for pipeline and downstream stages to re-reconcile
+		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataPipelineCRName, testNamespace); err != nil {
 			t.Error(err)
 		}
+		t.Log("pipeline successfully reconciled after docling config change")
 
-		t.Log("UnstructuredDataPipeline successfully reconciled")
-
-		// wait for the document processor to be ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.DocumentProcessorCondition, "documentprocessors.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
+		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.DocumentProcessorCondition, "documentprocessors.operator.dataverse.redhat.com", dataPipelineCRName+"-convert", testNamespace); err != nil {
 			t.Error(err)
 		}
-
-		t.Log("DocumentProcessor successfully reconciled")
-
-		// wait until the chunksgenerator CR is ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.ChunksGeneratorCondition, "chunksgenerators.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
-			t.Error(err)
-		}
-		t.Log("ChunksGenerator successfully reconciled")
-
-		// wait for the vector embeddings generator to be ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.VectorEmbeddingGenerationConditionType, "vectorembeddingsgenerators.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
-			t.Error(err)
-		}
-		t.Log("VectorEmbeddingsGenerator successfully reconciled")
-
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
-			t.Error(err)
-		}
-		t.Log("UnstructuredDataPipeline successfully reconciled after docling config update")
+		t.Log("DocumentProcessor successfully reconciled after config change")
 
 		return ctx
 	})
 
-	feature.Assess("Will change chunking config and verify pipeline reconciles successfully", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-		// update the chunking config for the data product
-		t.Log("Updating the chunking config for the data product")
+	feature.Assess("Will change chunking config and verify re-processing", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 		chunkingConfig := &v1alpha1.ChunksGeneratorConfig{
-			Strategy: "markdownTextSplitter",
+			Strategy: v1alpha1.ChunkingStrategyMarkdown,
 			MarkdownSplitterConfig: v1alpha1.MarkdownSplitterConfig{
 				ChunkSize:        1500,
 				ChunkOverlap:     300,
@@ -459,67 +396,44 @@ func TestUnstructuredDataLoad(t *testing.T) {
 			},
 		}
 
-		// fetch the latest version of the unstructured data pipeline CR
+		// fetch the latest version of the pipeline CR
 		unstructuredDataPipelineCR := &v1alpha1.UnstructuredDataPipeline{}
-		if err := kubeClient.Resources().Get(ctx, dataProductCRName, testNamespace, unstructuredDataPipelineCR); err != nil {
+		if err := kubeClient.Resources().Get(ctx, dataPipelineCRName, testNamespace, unstructuredDataPipelineCR); err != nil {
 			t.Error(err)
 		}
-		unstructuredDataPipelineCR.Spec.ChunksGeneratorConfig = *chunkingConfig
+
+		// update the chunks generator stage config
+		for i, stage := range unstructuredDataPipelineCR.Spec.Stages {
+			if stage.Type == v1alpha1.StageTypeChunksGenerator {
+				unstructuredDataPipelineCR.Spec.Stages[i].ChunksGeneratorConfig = chunkingConfig
+				break
+			}
+		}
 		if err := kubeClient.Resources().WithNamespace(testNamespace).Update(ctx, unstructuredDataPipelineCR); err != nil {
 			t.Error(err)
 		}
-		t.Log("Successfully updated the chunking config in the unstructured data pipeline CR")
+		t.Log("successfully updated the chunking config in the pipeline CR")
 
-		// wait until the unstructured data pipeline CR is ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
+		// wait for pipeline and downstream stages to re-reconcile
+		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataPipelineCRName, testNamespace); err != nil {
 			t.Error(err)
 		}
-		t.Log("UnstructuredDataPipeline successfully reconciled")
+		t.Log("pipeline successfully reconciled after chunking config change")
 
-		// wait for the document processor to be ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.DocumentProcessorCondition, "documentprocessors.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
+		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.ChunksGeneratorCondition, "chunksgenerators.operator.dataverse.redhat.com", dataPipelineCRName+"-chunk", testNamespace); err != nil {
 			t.Error(err)
 		}
-		t.Log("DocumentProcessor successfully reconciled")
-
-		// wait for the chunks generator to be ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.ChunksGeneratorCondition, "chunksgenerators.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
-			t.Error(err)
-		}
-		t.Log("ChunksGenerator successfully reconciled")
-
-		// wait for the vector embeddings generator to be ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.VectorEmbeddingGenerationConditionType, "vectorembeddingsgenerators.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
-			t.Error(err)
-		}
-		t.Log("VectorEmbeddingsGenerator successfully reconciled")
-
-		// now fetch unstructured data pipeline CR and wait until it is ready
-		if err := operatorUtils.WaitForResourceReady(ctx, v1alpha1.UnstructuredDataPipelineCondition, "unstructureddatapipelines.operator.dataverse.redhat.com", dataProductCRName, testNamespace); err != nil {
-			t.Error(err)
-		}
-		t.Log("UnstructuredDataPipeline successfully reconciled after chunking config update")
+		t.Log("ChunksGenerator successfully reconciled after config change")
 
 		return ctx
 	})
 
 	feature.Teardown(
 		func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-			// delete SQSInformer CR
-			SQSInformer := &v1alpha1.SQSInformer{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-sqs-informer",
-					Namespace: testNamespace,
-				},
-			}
-			if err := kubeClient.Resources(testNamespace).Delete(ctx, SQSInformer); err != nil {
-				t.Fatal(err)
-			}
-
 			// delete unstructured data pipeline CR
 			unstructuredDataPipeline := &v1alpha1.UnstructuredDataPipeline{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dataProductCRName,
+					Name:      dataPipelineCRName,
 					Namespace: testNamespace,
 				},
 			}

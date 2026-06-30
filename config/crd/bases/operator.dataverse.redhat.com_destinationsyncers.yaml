@@ -4,21 +4,21 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: chunksgenerators.operator.dataverse.redhat.com
+  name: destinationsyncers.operator.dataverse.redhat.com
 spec:
   group: operator.dataverse.redhat.com
   names:
-    kind: ChunksGenerator
-    listKind: ChunksGeneratorList
-    plural: chunksgenerators
-    singular: chunksgenerator
+    kind: DestinationSyncer
+    listKind: DestinationSyncerList
+    plural: destinationsyncers
+    singular: destinationsyncer
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.conditions[?(@.type=="ChunksGeneratorReady")].status
+    - jsonPath: .status.conditions[?(@.type=="DestinationSyncerReady")].status
       name: Status
       type: string
-    - jsonPath: .status.conditions[?(@.type=="ChunksGeneratorReady")].message
+    - jsonPath: .status.conditions[?(@.type=="DestinationSyncerReady")].message
       name: Message
       type: string
     - jsonPath: .status.filesProcessed
@@ -27,7 +27,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ChunksGenerator is the Schema for the chunksgenerators API
+        description: DestinationSyncer is the Schema for the destinationsyncers API.
         properties:
           apiVersion:
             description: |-
@@ -47,62 +47,8 @@ spec:
           metadata:
             type: object
           spec:
-            description: ChunksGeneratorSpec defines the desired state of ChunksGenerator
+            description: DestinationSyncerSpec defines the desired state of DestinationSyncer.
             properties:
-              config:
-                properties:
-                  markdownSplitterConfig:
-                    properties:
-                      chunkOverlap:
-                        type: integer
-                      chunkSize:
-                        type: integer
-                      codeBlocks:
-                        type: boolean
-                      headingHierarchy:
-                        type: boolean
-                      joinTableRows:
-                        type: boolean
-                      referenceLinks:
-                        type: boolean
-                    type: object
-                  recursiveCharacterSplitterConfig:
-                    properties:
-                      chunkOverlap:
-                        type: integer
-                      chunkSize:
-                        type: integer
-                      keepSeparator:
-                        type: boolean
-                      separators:
-                        items:
-                          type: string
-                        type: array
-                    type: object
-                  strategy:
-                    type: string
-                  tokenSplitterConfig:
-                    properties:
-                      allowedSpecial:
-                        items:
-                          type: string
-                        type: array
-                      chunkOverlap:
-                        type: integer
-                      chunkSize:
-                        type: integer
-                      disallowedSpecial:
-                        items:
-                          type: string
-                        type: array
-                      encodingName:
-                        type: string
-                      modelName:
-                        type: string
-                    type: object
-                required:
-                - strategy
-                type: object
               dependsOn:
                 items:
                   description: StageDependency identifies an upstream stage by name.
@@ -113,11 +59,32 @@ spec:
                   - name
                   type: object
                 type: array
+              destinationSyncerConfig:
+                description: DestinationSyncerConfig configures where to write processed
+                  data.
+                properties:
+                  s3DestinationConfig:
+                    description: S3Config configures an S3 bucket and optional prefix.
+                    properties:
+                      bucket:
+                        type: string
+                      prefix:
+                        type: string
+                      sqsQueueURL:
+                        type: string
+                    required:
+                    - bucket
+                    type: object
+                  type:
+                    type: string
+                type: object
+              secretRef:
+                type: string
               stageName:
                 type: string
             type: object
           status:
-            description: ChunksGeneratorStatus defines the observed state of ChunksGenerator
+            description: DestinationSyncerStatus defines the observed state of DestinationSyncer.
             properties:
               conditions:
                 items:

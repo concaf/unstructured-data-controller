@@ -18,8 +18,9 @@ rules:
   resources:
   - chunksgenerators
   - controllerconfigs
+  - destinationsyncers
   - documentprocessors
-  - sqsinformers
+  - sourcecrawlers
   - unstructureddatapipelines
   - vectorembeddingsgenerators
   verbs:
@@ -35,8 +36,9 @@ rules:
   resources:
   - chunksgenerators/finalizers
   - controllerconfigs/finalizers
+  - destinationsyncers/finalizers
   - documentprocessors/finalizers
-  - sqsinformers/finalizers
+  - sourcecrawlers/finalizers
   - unstructureddatapipelines/finalizers
   - vectorembeddingsgenerators/finalizers
   verbs:
@@ -46,8 +48,9 @@ rules:
   resources:
   - chunksgenerators/status
   - controllerconfigs/status
+  - destinationsyncers/status
   - documentprocessors/status
-  - sqsinformers/status
+  - sourcecrawlers/status
   - unstructureddatapipelines/status
   - vectorembeddingsgenerators/status
   verbs:

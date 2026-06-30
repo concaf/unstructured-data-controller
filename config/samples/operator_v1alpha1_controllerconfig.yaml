@@ -6,12 +6,9 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: controllerconfig
 spec:
-  unstructuredSecret: unstructured-secret
-  unstructuredDataProcessingConfig:
-    doclingServeURL: "http://localhost:5001"
-    ingestionBucket: "data-ingestion-bucket"
-    dataStorageBucket: "data-storage-bucket"
-    cacheDirectory: "tmp/cache/"
-    maxConcurrentDoclingTasks: 5
-    maxConcurrentLangchainTasks: 10
-    # unstructuredDataPipelineResyncInterval: 5 # value should be greater or equal to 1 minute
+  secretRef: operator-secret
+  doclingServeURL: "http://docling-serve:5001"
+  dataStorageBucket: "data-storage-bucket"
+  cacheDirectory: "tmp/cache/"
+  maxConcurrentDoclingTasks: 5
+  maxConcurrentLangchainTasks: 10

@@ -20,25 +20,34 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// sample spec:
+//
+//	spec:
+//	  secretRef: operator-secret             # k8s secret with filestore AWS creds, docling key, embedding credentials
+//	  dataStorageBucket: data-storage-bucket
+//	  cacheDirectory: /tmp/cache
+//	  doclingServeURL: http://docling-serve:5001
+//	  maxConcurrentDoclingTasks: 5
+//	  maxConcurrentLangchainTasks: 3
+//	  unstructuredDataPipelineResyncInterval: 300  # seconds
+//	status:
+//	  conditions:
+//	    - type: ConfigReady
+//	      status: "True"
+//	      message: Config is healthy
+
 const (
 	ConfigCondition = "ConfigReady"
 )
 
 // ControllerConfigSpec defines the desired state of ControllerConfig.
 type ControllerConfigSpec struct {
-	UnstructuredSecret               string                               `json:"unstructuredSecret,omitempty"`
-	UnstructuredDataProcessingConfig UnstructuredDataProcessingConfigSpec `json:"unstructuredDataProcessingConfig,omitempty"`
-}
-
-type UnstructuredDataProcessingConfigSpec struct {
-	MaxConcurrentDoclingTasks   int `json:"maxConcurrentDoclingTasks,omitempty"`
-	MaxConcurrentLangchainTasks int `json:"maxConcurrentLangchainTasks,omitempty"`
-
-	IngestionBucket string `json:"ingestionBucket,omitempty"`
-	DoclingServeURL string `json:"doclingServeURL,omitempty"`
-
-	CacheDirectory    string `json:"cacheDirectory,omitempty"`
-	DataStorageBucket string `json:"dataStorageBucket,omitempty"`
+	SecretRef                   string `json:"secretRef,omitempty"`
+	MaxConcurrentDoclingTasks   int    `json:"maxConcurrentDoclingTasks,omitempty"`
+	MaxConcurrentLangchainTasks int    `json:"maxConcurrentLangchainTasks,omitempty"`
+	DoclingServeURL             string `json:"doclingServeURL,omitempty"`
+	CacheDirectory              string `json:"cacheDirectory,omitempty"`
+	DataStorageBucket           string `json:"dataStorageBucket,omitempty"`
 	// +kubebuilder:validation:Minimum=1
 	UnstructuredDataPipelineResyncInterval *int `json:"unstructuredDataPipelineResyncInterval,omitempty"`
 }

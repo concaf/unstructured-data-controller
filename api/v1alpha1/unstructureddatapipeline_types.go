@@ -18,7 +18,53 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// sample spec:
+//
+//	spec:
+//	  secretRef: pipeline-secret             # k8s secret with source/destination AWS credentials
+//	  stages:
+//	    - name: crawl
+//	      type: SourceCrawler
+//	      sourceCrawlerConfig:
+//	        type: s3
+//	        s3Config:
+//	          bucket: data-ingestion-bucket
+//	          prefix: documents/
+//	    - name: convert
+//	      type: DocumentProcessor
+//	      dependsOn:
+//	        - name: crawl
+//	      documentProcessorConfig:
+//	        type: docling
+//	    - name: chunk
+//	      type: ChunksGenerator
+//	      dependsOn: [convert]
+//	      chunksGeneratorConfig:
+//	        strategy: recursiveCharacterTextSplitter
+//	    - name: embed
+//	      type: VectorEmbeddingsGenerator
+//	      dependsOn: [chunk]
+//	      vectorEmbeddingsGeneratorConfig:
+//	        modelName: nomic-embed-text-v1.5
+//	    - name: sync
+//	      type: DestinationSyncer
+//	      dependsOn: [embed]
+//	      destinationSyncerConfig:
+//	        type: s3
+//	        s3DestinationConfig:
+//	          bucket: output-bucket
+//	status:
+//	  stages:                                # tracks child CR creation
+//	    - name: crawl
+//	      created: true
+//	    - name: convert
+//	      created: true
+//	  conditions:
+//	    - type: UnstructuredDataPipelineReady
+//	      status: "True"
 
 type (
 	UnstructuredDataType string
@@ -33,6 +79,81 @@ const (
 
 	UnstructuredDataPipelineCondition = "UnstructuredDataPipelineReady"
 )
+
+// StageType is the discriminator for the stage union config.
+// +kubebuilder:validation:Enum=SourceCrawler;DocumentProcessor;ChunksGenerator;VectorEmbeddingsGenerator;DestinationSyncer
+type StageType string
+
+const (
+	StageTypeSourceCrawler             StageType = "SourceCrawler"
+	StageTypeDocumentProcessor         StageType = "DocumentProcessor"
+	StageTypeChunksGenerator           StageType = "ChunksGenerator"
+	StageTypeVectorEmbeddingsGenerator StageType = "VectorEmbeddingsGenerator"
+	StageTypeDestinationSyncer         StageType = "DestinationSyncer"
+)
+
+// +kubebuilder:object:generate=false
+type StageMapping struct {
+	Type       StageType
+	Object     client.Object
+	ObjectList client.ObjectList
+}
+
+func ListStages() []StageMapping {
+	return []StageMapping{
+		{StageTypeSourceCrawler, &SourceCrawler{}, &SourceCrawlerList{}},
+		{StageTypeDocumentProcessor, &DocumentProcessor{}, &DocumentProcessorList{}},
+		{StageTypeChunksGenerator, &ChunksGenerator{}, &ChunksGeneratorList{}},
+		{StageTypeVectorEmbeddingsGenerator, &VectorEmbeddingsGenerator{}, &VectorEmbeddingsGeneratorList{}},
+		{StageTypeDestinationSyncer, &DestinationSyncer{}, &DestinationSyncerList{}},
+	}
+}
+
+// PipelineStage defines a single step in the pipeline DAG.
+// +kubebuilder:validation:XValidation:rule="self.type == 'SourceCrawler' ? has(self.sourceCrawlerConfig) : true",message="sourceCrawlerConfig is required when type is SourceCrawler"
+// +kubebuilder:validation:XValidation:rule="self.type == 'DocumentProcessor' ? has(self.documentProcessorConfig) : true",message="documentProcessorConfig is required when type is DocumentProcessor"
+// +kubebuilder:validation:XValidation:rule="self.type == 'ChunksGenerator' ? has(self.chunksGeneratorConfig) : true",message="chunksGeneratorConfig is required when type is ChunksGenerator"
+// +kubebuilder:validation:XValidation:rule="self.type == 'VectorEmbeddingsGenerator' ? has(self.vectorEmbeddingsGeneratorConfig) : true",message="vectorEmbeddingsGeneratorConfig is required when type is VectorEmbeddingsGenerator"
+// +kubebuilder:validation:XValidation:rule="self.type == 'DestinationSyncer' ? has(self.destinationSyncerConfig) : true",message="destinationSyncerConfig is required when type is DestinationSyncer"
+type PipelineStage struct {
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Name string `json:"name"`
+
+	// +kubebuilder:validation:Required
+	Type StageType `json:"type"`
+
+	// +optional
+	DependsOn []StageDependency `json:"dependsOn,omitempty"`
+
+	// +optional
+	SourceCrawlerConfig *SourceCrawlerConfig `json:"sourceCrawlerConfig,omitempty"`
+	// +optional
+	DocumentProcessorConfig *DocumentProcessorConfig `json:"documentProcessorConfig,omitempty"`
+	// +optional
+	ChunksGeneratorConfig *ChunksGeneratorConfig `json:"chunksGeneratorConfig,omitempty"`
+	// +optional
+	VectorEmbeddingsGeneratorConfig *VectorEmbeddingsGeneratorConfig `json:"vectorEmbeddingsGeneratorConfig,omitempty"`
+	// +optional
+	DestinationSyncerConfig *DestinationSyncerConfig `json:"destinationSyncerConfig,omitempty"`
+}
+
+// SourceCrawlerConfig configures where to read unstructured data from.
+type SourceCrawlerConfig struct {
+	Type     UnstructuredDataType `json:"type,omitempty"`
+	S3Config S3Config             `json:"s3Config,omitempty"`
+}
+
+// DestinationSyncerConfig configures where to write processed data.
+type DestinationSyncerConfig struct {
+	Type                UnstructuredDataType `json:"type,omitempty"`
+	S3DestinationConfig S3Config             `json:"s3DestinationConfig,omitempty"`
+}
+
+// StageDependency identifies an upstream stage by name.
+type StageDependency struct {
+	Name string `json:"name"`
+}
 
 type DocumentProcessorConfig struct {
 	Type          string        `json:"type,omitempty"`
@@ -95,35 +216,32 @@ type NomicEmbedTextV15Config struct {
 
 // UnstructuredDataPipelineSpec defines the desired state of UnstructuredDataPipeline
 type UnstructuredDataPipelineSpec struct {
-	SourceConfig                    SourceConfig                    `json:"sourceConfig,omitempty"`
-	DestinationConfig               DestinationConfig               `json:"destinationConfig,omitempty"`
-	DocumentProcessorConfig         DocumentProcessorConfig         `json:"documentProcessorConfig,omitempty"`
-	ChunksGeneratorConfig           ChunksGeneratorConfig           `json:"chunksGeneratorConfig,omitempty"`
-	VectorEmbeddingsGeneratorConfig VectorEmbeddingsGeneratorConfig `json:"vectorEmbeddingsGeneratorConfig,omitempty"`
-}
-
-// SourceConfig defines where to read unstructured data from (e.g. S3).
-type SourceConfig struct {
-	Type     UnstructuredDataType `json:"type,omitempty"`
-	S3Config S3Config             `json:"s3Config,omitempty"`
+	// +optional
+	SecretRef string `json:"secretRef,omitempty"`
+	// +kubebuilder:validation:MinItems=1
+	// +listType=map
+	// +listMapKey=name
+	Stages []PipelineStage `json:"stages"`
 }
 
 // S3Config configures an S3 bucket and optional prefix.
 type S3Config struct {
-	Bucket string `json:"bucket"`
-	Prefix string `json:"prefix,omitempty"`
+	Bucket      string `json:"bucket"`
+	Prefix      string `json:"prefix,omitempty"`
+	SQSQueueURL string `json:"sqsQueueURL,omitempty"`
 }
 
-// DestinationConfig defines where to write processed data (e.g. S3).
-type DestinationConfig struct {
-	Type                UnstructuredDataType `json:"type,omitempty"`
-	S3DestinationConfig S3Config             `json:"s3DestinationConfig,omitempty"`
+// StageCreationStatus tracks whether a child CR has been created for a stage.
+type StageCreationStatus struct {
+	Name    string `json:"name"`
+	Created bool   `json:"created"`
 }
 
 // UnstructuredDataPipelineStatus defines the observed state of UnstructuredDataPipeline
 type UnstructuredDataPipelineStatus struct {
-	LastAppliedGeneration int64              `json:"lastAppliedGeneration,omitempty"`
-	Conditions            []metav1.Condition `json:"conditions,omitempty"`
+	LastAppliedGeneration int64                 `json:"lastAppliedGeneration,omitempty"`
+	Conditions            []metav1.Condition    `json:"conditions,omitempty"`
+	Stages                []StageCreationStatus `json:"stages,omitempty"`
 }
 
 // +kubebuilder:object:root=true

@@ -6,4 +6,11 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: chunksgenerator-sample
 spec:
-# TODO(user): Add fields here
+  stageName: chunk
+  dependsOn:
+    - name: convert
+  config:
+    strategy: recursiveCharacterTextSplitter
+    recursiveCharacterSplitterConfig:
+      chunkSize: 1000
+      chunkOverlap: 200

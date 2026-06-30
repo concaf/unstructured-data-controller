@@ -1,0 +1,14 @@
+apiVersion: operator.dataverse.redhat.com/v1alpha1
+kind: SourceCrawler
+metadata:
+  labels:
+    app.kubernetes.io/name: unstructured-data-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: sourcecrawler-sample
+spec:
+  stageName: crawl
+  sourceCrawlerConfig:
+    type: s3
+    s3Config:
+      bucket: data-ingestion-bucket
+      prefix: documents/

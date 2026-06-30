@@ -69,9 +69,8 @@ func TestMain(m *testing.M) {
 				log.Fatalf("Failed to register v1alpha1 scheme: %s", err)
 			}
 
-			kindCluster := kind.NewCluster(kindClusterName)
-
 			if skipClusterSetup != "true" {
+				kindCluster := kind.NewCluster(kindClusterName)
 				log.Printf("Creating new kind cluster with name: %s", kindClusterName)
 				envFuncs := []env.Func{
 					envfuncs.CreateCluster(kindCluster, kindClusterName),
@@ -287,7 +286,6 @@ func testSetup(ctx context.Context, runningProcesses *[]exec.Cmd, config *envcon
 
 	skipConfigReady := os.Getenv("SKIP_CONTROLLER_CONFIG_READY")
 	if skipConfigReady == "true" {
-		log.Println("SKIP_CONTROLLER_CONFIG_READY=true: skipping wait for ConfigReady")
 		return nil
 	}
 	log.Println("Waiting for ControllerConfig to be healthy (ConfigReady=true)...")

@@ -49,13 +49,8 @@ type FileStore struct {
 // rootPath: /var/lib/unstructured/
 // s3Bucket: unstructured-data-bucket
 func New(_ context.Context, rootPath string, s3Bucket string) (*FileStore, error) {
-	// check if the root directory exists, and verify it is a directory
-	info, err := os.Stat(rootPath)
-	if err != nil {
-		return nil, err
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("root is not a directory: %s", rootPath)
+	if err := os.MkdirAll(rootPath, 0o755); err != nil {
+		return nil, fmt.Errorf("failed to create cache directory %s: %w", rootPath, err)
 	}
 
 	// generate s3 client
@@ -216,8 +211,10 @@ func (fs *FileStore) Retrieve(ctx context.Context, path string) ([]byte, error) 
 	}
 
 	// write to local filesystem
-	err = os.WriteFile(localPath, data, 0644)
-	if err != nil {
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(localPath, data, 0644); err != nil {
 		return nil, err
 	}
 

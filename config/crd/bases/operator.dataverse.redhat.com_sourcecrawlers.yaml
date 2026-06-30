@@ -4,27 +4,30 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: sqsinformers.operator.dataverse.redhat.com
+  name: sourcecrawlers.operator.dataverse.redhat.com
 spec:
   group: operator.dataverse.redhat.com
   names:
-    kind: SQSInformer
-    listKind: SQSInformerList
-    plural: sqsinformers
-    singular: sqsinformer
+    kind: SourceCrawler
+    listKind: SourceCrawlerList
+    plural: sourcecrawlers
+    singular: sourcecrawler
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.conditions[?(@.type=="SQSInformerReady")].status
+    - jsonPath: .status.conditions[?(@.type=="SourceCrawlerReady")].status
       name: Status
       type: string
-    - jsonPath: .status.conditions[?(@.type=="SQSInformerReady")].message
+    - jsonPath: .status.conditions[?(@.type=="SourceCrawlerReady")].message
       name: Message
       type: string
+    - jsonPath: .status.filesProcessed
+      name: Files
+      type: integer
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: SQSInformer is the Schema for the sqsinformers API.
+        description: SourceCrawler is the Schema for the sourcecrawlers API.
         properties:
           apiVersion:
             description: |-
@@ -44,13 +47,44 @@ spec:
           metadata:
             type: object
           spec:
-            description: SQSInformerSpec defines the desired state of SQSInformer.
+            description: SourceCrawlerSpec defines the desired state of SourceCrawler.
             properties:
-              queueURL:
+              dependsOn:
+                items:
+                  description: StageDependency identifies an upstream stage by name.
+                  properties:
+                    name:
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              secretRef:
+                type: string
+              sourceCrawlerConfig:
+                description: SourceCrawlerConfig configures where to read unstructured
+                  data from.
+                properties:
+                  s3Config:
+                    description: S3Config configures an S3 bucket and optional prefix.
+                    properties:
+                      bucket:
+                        type: string
+                      prefix:
+                        type: string
+                      sqsQueueURL:
+                        type: string
+                    required:
+                    - bucket
+                    type: object
+                  type:
+                    type: string
+                type: object
+              stageName:
                 type: string
             type: object
           status:
-            description: SQSInformerStatus defines the observed state of SQSInformer.
+            description: SourceCrawlerStatus defines the observed state of SourceCrawler.
             properties:
               conditions:
                 items:
@@ -108,6 +142,9 @@ spec:
                   - type
                   type: object
                 type: array
+              filesProcessed:
+                format: int64
+                type: integer
               lastAppliedGeneration:
                 format: int64
                 type: integer
