@@ -48,6 +48,11 @@ spec:
             description: UnstructuredDataPipelineSpec defines the desired state of
               UnstructuredDataPipeline
             properties:
+              description:
+                description: Description is a human-readable summary of what the pipeline
+                  does.
+                minLength: 1
+                type: string
               secretRef:
                 type: string
               stages:
@@ -244,6 +249,7 @@ spec:
                 - name
                 x-kubernetes-list-type: map
             required:
+            - description
             - stages
             type: object
           status:

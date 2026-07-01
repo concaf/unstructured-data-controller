@@ -48,6 +48,7 @@ func GetUnstructuredDataPipelineResourceWithStage(name, namespace string) v1alph
 			},
 		},
 		Spec: v1alpha1.UnstructuredDataPipelineSpec{
+			Description: "e2e test pipeline",
 			Stages: []v1alpha1.PipelineStage{
 				{
 					Name: "crawl",
