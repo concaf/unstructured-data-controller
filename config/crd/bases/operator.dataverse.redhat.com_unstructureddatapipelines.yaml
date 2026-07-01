@@ -182,6 +182,45 @@ spec:
                     name:
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                       type: string
+                    queryConfig:
+                      description: |-
+                        QueryConfig describes where a stage's output data can be queried.
+                        This is purely informational metadata for the MCP server — the pipeline
+                        controller does not act on it or create the query endpoint.
+                      properties:
+                        snowflake:
+                          description: SnowflakeQueryConfig contains the connection
+                            details for a Snowflake query endpoint.
+                          properties:
+                            account:
+                              type: string
+                            database:
+                              type: string
+                            schema:
+                              type: string
+                            table:
+                              type: string
+                            warehouse:
+                              type: string
+                          required:
+                          - account
+                          - database
+                          - schema
+                          - table
+                          type: object
+                        type:
+                          description: QueryEndpointType identifies the type of query
+                            endpoint.
+                          enum:
+                          - snowflake
+                          type: string
+                      required:
+                      - type
+                      type: object
+                      x-kubernetes-validations:
+                      - message: snowflake is required when type is snowflake
+                        rule: 'self.type == ''snowflake'' ? has(self.snowflake) :
+                          true'
                     sourceCrawlerConfig:
                       description: SourceCrawlerConfig configures where to read unstructured
                         data from.

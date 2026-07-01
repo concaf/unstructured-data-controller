@@ -136,6 +136,9 @@ type PipelineStage struct {
 	VectorEmbeddingsGeneratorConfig *VectorEmbeddingsGeneratorConfig `json:"vectorEmbeddingsGeneratorConfig,omitempty"`
 	// +optional
 	DestinationSyncerConfig *DestinationSyncerConfig `json:"destinationSyncerConfig,omitempty"`
+
+	// +optional
+	QueryConfig *QueryConfig `json:"queryConfig,omitempty"`
 }
 
 // SourceCrawlerConfig configures where to read unstructured data from.
@@ -212,6 +215,35 @@ type VectorEmbeddingsGeneratorConfig struct {
 
 type NomicEmbedTextV15Config struct {
 	EncodingFormat string `json:"encodingformat,omitempty"`
+}
+
+// QueryEndpointType identifies the type of query endpoint.
+// +kubebuilder:validation:Enum=snowflake
+type QueryEndpointType string
+
+const (
+	QueryEndpointTypeSnowflake QueryEndpointType = "snowflake"
+)
+
+// QueryConfig describes where a stage's output data can be queried.
+// This is purely informational metadata for the MCP server — the pipeline
+// controller does not act on it or create the query endpoint.
+// +kubebuilder:validation:XValidation:rule="self.type == 'snowflake' ? has(self.snowflake) : true",message="snowflake is required when type is snowflake"
+type QueryConfig struct {
+	// +kubebuilder:validation:Required
+	Type QueryEndpointType `json:"type"`
+	// +optional
+	Snowflake *SnowflakeQueryConfig `json:"snowflake,omitempty"`
+}
+
+// SnowflakeQueryConfig contains the connection details for a Snowflake query endpoint.
+type SnowflakeQueryConfig struct {
+	Account  string `json:"account"`
+	Database string `json:"database"`
+	Schema   string `json:"schema"`
+	Table    string `json:"table"`
+	// +optional
+	Warehouse string `json:"warehouse,omitempty"`
 }
 
 // UnstructuredDataPipelineSpec defines the desired state of UnstructuredDataPipeline
