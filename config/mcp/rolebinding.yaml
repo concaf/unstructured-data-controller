@@ -1,13 +1,13 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: mcp-server-rolebinding
+  name: unstructured-data-mcp-server-rolebinding
   labels:
-    app: mcp-server
+    app: unstructured-data-mcp-server
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: mcp-server-role
+  name: unstructured-data-mcp-server-role
 subjects:
 - kind: ServiceAccount
-  name: mcp-server
+  name: unstructured-data-mcp-server

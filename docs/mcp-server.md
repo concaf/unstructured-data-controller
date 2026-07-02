@@ -56,7 +56,7 @@ The Snowflake connection uses the `PUBLIC` role by default to avoid defaulting t
 ### Example `.env`
 
 ```bash
-SSO_CLIENT_ID=mcp-server
+SSO_CLIENT_ID=unstructured-data-mcp-server
 SSO_CLIENT_SECRET=your-client-secret
 SSO_AUTHORIZATION_URL=https://sso.example.com/auth/realms/myrealm/protocol/openid-connect/auth
 SSO_TOKEN_URL=https://sso.example.com/auth/realms/myrealm/protocol/openid-connect/token
@@ -80,10 +80,10 @@ The server detects it is running outside a cluster and falls back to your local 
 
 ```bash
 # Build
-go build -o mcp-server ./cmd/mcp-server/
+go build -o unstructured-data-mcp-server ./cmd/mcp-server/
 
 # Run (ensure .env is sourced or variables are exported)
-./mcp-server
+./unstructured-data-mcp-server
 ```
 
 The server starts on `:8080` (or `MCP_SERVER_PORT`) and logs JSON to stdout.
@@ -169,7 +169,7 @@ The full authorization flow follows the [MCP Authorization specification (2025-1
 ## Package Structure
 
 ```
-cmd/mcp-server/
+cmd/unstructured-data-mcp-server/
   main.go                  ← entry point, wiring
 
 pkg/auth/

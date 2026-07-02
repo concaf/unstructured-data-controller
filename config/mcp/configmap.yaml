@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: mcp-server-config
+  name: unstructured-data-mcp-server-config
   labels:
-    app: mcp-server
+    app: unstructured-data-mcp-server
 data:
   # TODO: Replace YOUR_REALM with your actual Red Hat SSO realm
   SSO_AUTHORIZATION_URL: "<SSO_AUTHORIZATION_URL>"

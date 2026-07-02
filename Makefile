@@ -207,6 +207,15 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 	- $(CONTAINER_TOOL) buildx rm unstructured-data-controller-builder
 	rm Dockerfile.cross
 
+.PHONY: docker-buildx-mcp
+docker-buildx-mcp: ## Build and push docker image for the MCP server for cross-platform support
+	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile.mcp > Dockerfile.mcp.cross
+	- $(CONTAINER_TOOL) buildx create --name unstructured-data-controller-builder
+	$(CONTAINER_TOOL) buildx use unstructured-data-controller-builder
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG_MCP} -f Dockerfile.mcp.cross .
+	- $(CONTAINER_TOOL) buildx rm unstructured-data-controller-builder
+	rm Dockerfile.mcp.cross
+
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
 	mkdir -p dist
@@ -247,12 +256,12 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 
 .PHONY: deploy-mcp
 deploy-mcp: kustomize ## Deploy MCP server to the K8s cluster specified in ~/.kube/config.
-	cd config/mcp && $(KUSTOMIZE) edit set image mcp-server=${IMG_MCP} && $(KUSTOMIZE) edit set namespace "${DEPLOYMENT_NAMESPACE}"
+	cd config/mcp && $(KUSTOMIZE) edit set image unstructured-data-mcp-server=${IMG_MCP} && $(KUSTOMIZE) edit set namespace "${DEPLOYMENT_NAMESPACE}"
 	$(KUSTOMIZE) build config/mcp | $(KUBECTL) apply -f -
 
 .PHONY: generate-mcp-manifests
 generate-mcp-manifests: kustomize
-	cd config/mcp && $(KUSTOMIZE) edit set image mcp-server=${IMG_MCP} && $(KUSTOMIZE) edit set namespace "${DEPLOYMENT_NAMESPACE}"
+	cd config/mcp && $(KUSTOMIZE) edit set image unstructured-data-mcp-server=${IMG_MCP} && $(KUSTOMIZE) edit set namespace "${DEPLOYMENT_NAMESPACE}"
 	$(KUSTOMIZE) build config/mcp -o ${OUTPUT_FILE}
 
 .PHONY: undeploy-mcp

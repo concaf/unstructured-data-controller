@@ -20,14 +20,14 @@ COPY api/ api/
 
 # Build
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -a -o mcp-server cmd/mcp-server/main.go
+    go build -a -o unstructured-data-mcp-server cmd/unstructured-data-mcp-server/main.go
 
 # Use Red Hat UBI minimal as runtime image
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 WORKDIR /
-COPY --from=builder /opt/app-root/src/mcp-server .
+COPY --from=builder /opt/app-root/src/unstructured-data-mcp-server .
 
 USER 65532:65532
 
-ENTRYPOINT ["/mcp-server"]
+ENTRYPOINT ["/unstructured-data-mcp-server"]

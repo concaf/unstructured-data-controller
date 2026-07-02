@@ -1,31 +1,32 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: mcp-server
+  name: unstructured-data-mcp-server
   labels:
-    app: mcp-server
-    component: mcp-server
+    app: unstructured-data-mcp-server
+    component: unstructured-data-mcp-server
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: mcp-server
+      app: unstructured-data-mcp-server
   template:
     metadata:
       labels:
-        app: mcp-server
+        app: unstructured-data-mcp-server
     spec:
-      serviceAccountName: mcp-server
+      serviceAccountName: unstructured-data-mcp-server
       securityContext:
+        # Projects are configured by default to adhere to the "restricted" Pod Security Standards.
+        # This ensures that deployments meet the highest security requirements for Kubernetes.
+        # For more details, see: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
         runAsNonRoot: true
-        runAsUser: 65532
-        fsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
 
       containers:
-      - name: mcp-server
-        image: mcp-server:latest
+      - name: unstructured-data-mcp-server
+        image: unstructured-data-mcp-server:latest
         imagePullPolicy: Always
 
         ports:
@@ -35,9 +36,9 @@ spec:
 
         envFrom:
         - configMapRef:
-            name: mcp-server-config
+            name: unstructured-data-mcp-server-config
         - secretRef:
-            name: mcp-server-secret
+            name: unstructured-data-mcp-server-secret
 
         livenessProbe:
           httpGet:
@@ -73,9 +74,6 @@ spec:
           allowPrivilegeEscalation: false
           capabilities:
             drop:
-            - ALL
-          readOnlyRootFilesystem: false
-          runAsNonRoot: true
-          runAsUser: 65532
+            - "ALL"
 
       restartPolicy: Always
