@@ -242,8 +242,6 @@ type SnowflakeQueryConfig struct {
 	Database string `json:"database"`
 	Schema   string `json:"schema"`
 	Table    string `json:"table"`
-	// +optional
-	Warehouse string `json:"warehouse,omitempty"`
 }
 
 // UnstructuredDataPipelineSpec defines the desired state of UnstructuredDataPipeline
