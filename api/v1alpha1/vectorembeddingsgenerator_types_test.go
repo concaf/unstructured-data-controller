@@ -27,6 +27,9 @@ func TestVectorEmbeddingsGeneratorConfig_SetDefaults_EmptyConfig(t *testing.T) {
 	if c.ModelName != DefaultEmbeddingModelName {
 		t.Errorf("expected modelName %q, got %q", DefaultEmbeddingModelName, c.ModelName)
 	}
+	if c.BatchSize != DefaultBatchSize {
+		t.Errorf("expected batchSize %d, got %d", DefaultBatchSize, c.BatchSize)
+	}
 }
 
 func TestVectorEmbeddingsGeneratorConfig_SetDefaults_PreservesExplicitModel(t *testing.T) {
