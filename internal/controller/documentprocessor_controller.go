@@ -404,21 +404,11 @@ func (r *DocumentProcessorReconciler) needsConversion(ctx context.Context, rawFi
 			DoclingConfig:     documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig,
 		}
 
-		// try new array format first
 		var convertedRows []unstructured.ConvertedRow
 		if err := json.Unmarshal(convertedFileRaw, &convertedRows); err == nil && len(convertedRows) > 0 && convertedRows[0].Metadata != nil {
 			if convertedRows[0].Metadata.Equal(&fileToConvertMetadata) {
 				logger.Info("converted file has the same configuration, no conversion needed", "filePath", rawFilePath)
 				return false, nil
-			}
-		} else {
-			// fall back to old single-object format
-			convertedFile := unstructured.ConvertedFile{}
-			if err := json.Unmarshal(convertedFileRaw, &convertedFile); err == nil && convertedFile.ConvertedDocument != nil && convertedFile.ConvertedDocument.Metadata != nil {
-				if convertedFile.ConvertedDocument.Metadata.Equal(&fileToConvertMetadata) {
-					logger.Info("converted file has the same configuration, no conversion needed", "filePath", rawFilePath)
-					return false, nil
-				}
 			}
 		}
 	}

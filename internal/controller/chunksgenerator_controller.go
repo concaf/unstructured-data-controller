@@ -242,26 +242,15 @@ func (r *ChunksGeneratorReconciler) needsChunking(ctx context.Context, converted
 		ChunksGeneratorConfig: chunksGeneratorCR.Spec.ChunksGeneratorConfig,
 	}
 
-	// try new array format first
 	var chunkRows []unstructured.ChunkRow
-	if err := json.Unmarshal(chunksFileRaw, &chunkRows); err == nil && len(chunkRows) > 0 && chunkRows[0].Metadata != nil {
-		if chunkRows[0].Metadata.Equal(&newChunksFileMetadata) {
-			return false, nil
-		}
-		logger.Info("chunks file config has changed, re-chunking needed", "file", convertedFilePath)
-		return true, nil
-	}
-
-	// fall back to old single-object format
-	chunksFile := unstructured.ChunksFile{}
-	if parseErr := json.Unmarshal(chunksFileRaw, &chunksFile); parseErr != nil {
-		logger.Info("chunks file exists but cannot be parsed, re-chunking needed", "file", convertedFilePath)
+	if err := json.Unmarshal(chunksFileRaw, &chunkRows); err != nil {
+		logger.Info("chunks file cannot be parsed, re-chunking needed", "file", convertedFilePath)
 		return true, nil //nolint:nilerr // unparseable file means re-chunking is needed
 	}
-	if chunksFile.ChunksDocument == nil || chunksFile.ChunksDocument.Metadata == nil {
+	if len(chunkRows) == 0 || chunkRows[0].Metadata == nil {
 		return true, nil
 	}
-	if !chunksFile.ChunksDocument.Metadata.Equal(&newChunksFileMetadata) {
+	if !chunkRows[0].Metadata.Equal(&newChunksFileMetadata) {
 		logger.Info("chunks file config has changed, re-chunking needed", "file", convertedFilePath)
 		return true, nil
 	}
@@ -275,18 +264,14 @@ func (r *ChunksGeneratorReconciler) readConvertedFile(ctx context.Context, conve
 		return "", nil, err
 	}
 
-	// try new array format first
 	var convertedRows []unstructured.ConvertedRow
-	if err := json.Unmarshal(convertedFileRaw, &convertedRows); err == nil && len(convertedRows) > 0 && convertedRows[0].Metadata != nil {
-		return convertedRows[0].Markdown, convertedRows[0].Metadata, nil
-	}
-
-	// fall back to old single-object format
-	convertedFile := unstructured.ConvertedFile{}
-	if err := json.Unmarshal(convertedFileRaw, &convertedFile); err != nil {
+	if err := json.Unmarshal(convertedFileRaw, &convertedRows); err != nil {
 		return "", nil, err
 	}
-	return convertedFile.ConvertedDocument.Content.Markdown, convertedFile.ConvertedDocument.Metadata, nil
+	if len(convertedRows) == 0 || convertedRows[0].Metadata == nil {
+		return "", nil, fmt.Errorf("converted file %s has no rows or missing metadata", convertedFilePath)
+	}
+	return convertedRows[0].Markdown, convertedRows[0].Metadata, nil
 }
 
 func (r *ChunksGeneratorReconciler) chunkFile(ctx context.Context, convertedFilePath string, chunksGeneratorCR *operatorv1alpha1.ChunksGenerator) ([]unstructured.ChunkRow, error) {
