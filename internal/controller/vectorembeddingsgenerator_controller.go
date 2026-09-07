@@ -163,15 +163,27 @@ func (r *VectorEmbeddingsGeneratorReconciler) processChunkedFile(ctx context.Con
 		return false, nil
 	}
 
-	texts, fileID, convertedMeta, chunksMeta, err := r.readChunksFile(ctx, chunksFilePath)
+	logger.Info("retrieving chunked file from filestore", "file", chunksFilePath)
+	chunkedFileRaw, err := r.fileStore.Retrieve(ctx, chunksFilePath)
 	if err != nil {
-		logger.Error(err, "failed to read chunked file")
+		logger.Error(err, "failed to retrieve chunked file")
 		return false, err
 	}
 
-	if len(texts) == 0 {
+	var chunkRows []unstructured.ChunkRow
+	if err := json.Unmarshal(chunkedFileRaw, &chunkRows); err != nil {
+		logger.Error(err, "failed to unmarshal chunked file")
+		return false, err
+	}
+
+	if len(chunkRows) == 0 {
 		logger.Info("chunks file has no text chunks, skipping", "file", chunksFilePath)
 		return false, nil
+	}
+
+	texts := make([]string, len(chunkRows))
+	for i, row := range chunkRows {
+		texts[i] = row.Text
 	}
 
 	vegConfig := vectorEmbeddingsGeneratorCR.Spec.VectorEmbeddingsGeneratorConfig
@@ -190,8 +202,8 @@ func (r *VectorEmbeddingsGeneratorReconciler) processChunkedFile(ctx context.Con
 	})
 
 	embeddingFileMetadata := &unstructured.EmbeddingFileMetadata{
-		ConvertedFileMetadata:   convertedMeta,
-		ChunkFileMetadata:       chunksMeta,
+		ConvertedFileMetadata:   chunkRows[0].Metadata.ConvertedFileMetadata,
+		ChunkFileMetadata:       chunkRows[0].Metadata,
 		ModelName:               modelName,
 		NomicEmbedTextV15Config: vegConfig.NomicEmbedTextV15Config,
 		GeminiEmbedding2Config:  vegConfig.GeminiEmbedding2Config,
@@ -241,7 +253,7 @@ func (r *VectorEmbeddingsGeneratorReconciler) processChunkedFile(ctx context.Con
 	embeddingRows := make([]unstructured.EmbeddingRow, len(allEmbeddings))
 	for i, embeddingVector := range allEmbeddings {
 		embeddingRows[i] = unstructured.EmbeddingRow{
-			FileID:     fileID,
+			FileID:     chunkRows[0].FileID,
 			ChunkIndex: i,
 			Text:       texts[i],
 			Embedding:  embeddingVector,
@@ -266,29 +278,6 @@ func (r *VectorEmbeddingsGeneratorReconciler) processChunkedFile(ctx context.Con
 	return true, nil
 }
 
-func (r *VectorEmbeddingsGeneratorReconciler) readChunksFile(ctx context.Context, chunksFilePath string) (texts []string, fileID string, convertedMeta *unstructured.ConvertedFileMetadata, chunksMeta *unstructured.ChunksFileMetadata, err error) {
-	chunkedFileRaw, err := r.fileStore.Retrieve(ctx, chunksFilePath)
-	if err != nil {
-		return nil, "", nil, nil, err
-	}
-
-	var chunkRows []unstructured.ChunkRow
-	if err := json.Unmarshal(chunkedFileRaw, &chunkRows); err != nil {
-		return nil, "", nil, nil, err
-	}
-	if len(chunkRows) == 0 {
-		return nil, "", nil, nil, nil
-	}
-	if chunkRows[0].Metadata == nil {
-		return nil, "", nil, nil, errors.New("invalid chunks file structure: missing metadata")
-	}
-	texts = make([]string, len(chunkRows))
-	for i, row := range chunkRows {
-		texts[i] = row.Text
-	}
-	return texts, chunkRows[0].FileID, chunkRows[0].Metadata.ConvertedFileMetadata, chunkRows[0].Metadata, nil
-}
-
 func (r *VectorEmbeddingsGeneratorReconciler) needsEmbedding(ctx context.Context, chunksFilePath string, vectorEmbeddingsGeneratorCR *operatorv1alpha1.VectorEmbeddingsGenerator, inputPath, outputPath string) (bool, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("checking if file needs embedding", "file", chunksFilePath)
@@ -303,8 +292,13 @@ func (r *VectorEmbeddingsGeneratorReconciler) needsEmbedding(ctx context.Context
 		return false, err
 	}
 
-	_, _, convertedMeta, chunksMeta, err := r.readChunksFile(ctx, chunksFilePath)
+	chunkedFileRaw, err := r.fileStore.Retrieve(ctx, chunksFilePath)
 	if err != nil {
+		return false, err
+	}
+
+	var chunkRows []unstructured.ChunkRow
+	if err := json.Unmarshal(chunkedFileRaw, &chunkRows); err != nil {
 		return false, err
 	}
 
@@ -322,8 +316,8 @@ func (r *VectorEmbeddingsGeneratorReconciler) needsEmbedding(ctx context.Context
 		}
 
 		fileToEmbedMetadata := &unstructured.EmbeddingFileMetadata{
-			ConvertedFileMetadata:   convertedMeta,
-			ChunkFileMetadata:       chunksMeta,
+			ConvertedFileMetadata:   chunkRows[0].Metadata.ConvertedFileMetadata,
+			ChunkFileMetadata:       chunkRows[0].Metadata,
 			ModelName:               vectorEmbeddingsGeneratorCR.Spec.VectorEmbeddingsGeneratorConfig.ModelName,
 			NomicEmbedTextV15Config: vectorEmbeddingsGeneratorCR.Spec.VectorEmbeddingsGeneratorConfig.NomicEmbedTextV15Config,
 			GeminiEmbedding2Config:  vectorEmbeddingsGeneratorCR.Spec.VectorEmbeddingsGeneratorConfig.GeminiEmbedding2Config,
