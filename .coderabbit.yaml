@@ -15,7 +15,7 @@ reviews:
   request_changes_workflow: false
   high_level_summary: true
   poem: false
-  collapse_walkthrough: false
+  collapse_walkthrough: true
   sequence_diagrams: false
   changed_files_summary: true
 
@@ -152,6 +152,11 @@ reviews:
     base_branches:
       - main
       - "release-*"
+    ignore_title_keywords:
+      - wip
+      - draft
+      - do-not-merge
+      - "\\[skip review\\]"
 
 chat:
   auto_reply: true
@@ -159,3 +164,9 @@ chat:
 knowledge_base:
   learnings:
     scope: auto
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "**/.claude/CLAUDE.md"
+      - "**/.claude/rules/*.md"
+      - "**/CONTRIBUTING.md"
