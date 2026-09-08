@@ -4,11 +4,18 @@ Kubernetes operator (kubebuilder) for unstructured data pipelines — crawling s
 
 ## Commands
 
+Always use `make` targets instead of raw `go` commands — they include the right flags, dependencies, and setup.
+
 - `make lint` — golangci-lint + yamllint. Run before every commit.
 - `make test` — unit tests with envtest.
 - `make build` — build the manager binary.
+- `make fmt` — go fmt.
+- `make vet` — go vet.
+- `make lint-fix` — auto-fix lint issues.
 - `make manifests generate` — regenerate CRDs and DeepCopy after any `api/v1alpha1/` changes.
-- `go mod tidy && go mod vendor` — after any dependency changes.
+- `make install` — install CRDs into cluster.
+- `make deploy` — deploy controller to cluster.
+- `go mod tidy && go mod vendor` — after dependency changes (no make target for this).
 
 ## Architecture
 
