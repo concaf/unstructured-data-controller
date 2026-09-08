@@ -26,6 +26,7 @@ Kubernetes operator (kubebuilder) for unstructured data pipelines — crawling s
 - Stability is critical. This system serves critical data and processes — changes must not break existing functionality. Prefer safe, incremental changes. When in doubt, be conservative.
 - Tests are critical. Every change must have tests — they catch bugs and prevent regressions. Write unit tests for new logic, update existing tests when behavior changes. If a bug is fixed, add a test that would have caught it. No PR should reduce test coverage.
 - Always run `make lint` and `make test` before pushing. Do not push code that fails linting or tests.
+- Align with architecture. Changes must fit the established architecture — one controller per CRD, shared utils in controllerutils, pure library code in pkg/. If a change doesn't fit, discuss the architectural implication before proceeding.
 - Best practices over existing code. If something in this codebase contradicts Go, controller-runtime, or Kubernetes conventions, challenge it — do not blindly copy a bad pattern.
 - Always ask why. Poke holes in decisions — don't accept an approach just because it's what the existing code does. If you can't justify a pattern, question it.
 - Code is reviewed by humans. Add comments explaining the *why* behind decisions, choices, and non-obvious logic. Every conditional branch, fallback, retry, timeout, or workaround should have a comment explaining the reasoning. A future reader should understand the intent without asking the author.
