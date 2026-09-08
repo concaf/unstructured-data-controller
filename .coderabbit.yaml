@@ -88,6 +88,7 @@ reviews:
         - E2E tests must use //go:build e2e tag and sigs.k8s.io/e2e-framework
         - Unit tests should use envtest where Kubernetes interaction is needed
         - Table-driven tests with descriptive test case names
+        - Tests must cover both passing and failing cases — not just the happy path
         - Assertions should check specific error messages/types, not just err != nil
         - Dot imports of ginkgo/v2 and gomega are allowed in this project
 
