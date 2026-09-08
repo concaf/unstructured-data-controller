@@ -4,7 +4,11 @@ description: Reviews code changes for Kubernetes operator patterns and best prac
 tools: Read, Grep, Glob, Bash
 ---
 
-Review the current changes (use `git diff` and `git diff --cached`) for:
+Review the current changes (use `git diff` and `git diff --cached`).
+
+Do not blindly accept patterns just because they exist in the codebase. If existing code contradicts Go or controller-runtime best practices, flag it. The existing `handleError` pattern double-logs (logs + returns) — do not let new code copy this.
+
+Check for:
 
 ## Error Handling
 - Every error return is checked — no `_ = foo()` for error-returning functions
