@@ -215,6 +215,8 @@ func (r *ChunksGeneratorReconciler) needsChunking(ctx context.Context, converted
 
 	chunksFilePath := unstructured.RemapToOutputDir(convertedFilePath, inputPath, outputPath)
 
+	// fetch the converted file from the filestore
+	// this will also make sure that the converted file exists in the filestore
 	convertedFileRaw, err := r.fileStore.Retrieve(ctx, convertedFilePath)
 	if err != nil {
 		return false, err
@@ -242,6 +244,7 @@ func (r *ChunksGeneratorReconciler) needsChunking(ctx context.Context, converted
 		return false, err
 	}
 
+	// now the chunks file should be the same as the current chunks file in filestore
 	newChunksFileMetadata := unstructured.ChunksFileMetadata{
 		ConvertedFileMetadata: convertedFileMetadata,
 		ChunkingTool:          unstructured.LangchainChunkingTool,
@@ -268,6 +271,7 @@ func (r *ChunksGeneratorReconciler) chunkFile(ctx context.Context, convertedFile
 	logger := log.FromContext(ctx)
 	logger.Info("chunking file", "file", convertedFilePath)
 
+	// read the converted file from the filestore
 	convertedFileRaw, err := r.fileStore.Retrieve(ctx, convertedFilePath)
 	if err != nil {
 		return nil, err

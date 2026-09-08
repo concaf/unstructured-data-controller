@@ -176,6 +176,7 @@ func (r *VectorEmbeddingsGeneratorReconciler) processChunkedFile(ctx context.Con
 		return false, err
 	}
 
+	// Validate chunked file structure
 	if len(chunkRows) == 0 {
 		logger.Info("chunks file has no text chunks, skipping", "file", chunksFilePath)
 		return false, nil
@@ -250,6 +251,7 @@ func (r *VectorEmbeddingsGeneratorReconciler) processChunkedFile(ctx context.Con
 
 	logger.Info("successfully generated embeddings", "file", chunksFilePath, "embeddingCount", len(allEmbeddings))
 
+	// Create the embeddings rows
 	embeddingRows := make([]unstructured.EmbeddingRow, len(allEmbeddings))
 	for i, embeddingVector := range allEmbeddings {
 		embeddingRows[i] = unstructured.EmbeddingRow{
@@ -328,6 +330,7 @@ func (r *VectorEmbeddingsGeneratorReconciler) needsEmbedding(ctx context.Context
 			logger.Info("embeddings file cannot be parsed, will re-embed", "file", chunksFilePath, "error", err)
 			return true, nil
 		}
+		// Check if the embedded file structure is valid
 		if len(embeddingRows) == 0 || embeddingRows[0].Metadata == nil {
 			logger.Info("embeddings file has invalid structure, will re-embed", "file", chunksFilePath)
 			return true, nil
