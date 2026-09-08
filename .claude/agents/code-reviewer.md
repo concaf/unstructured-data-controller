@@ -51,6 +51,11 @@ Check for:
 - If `go.mod` changed: verify `go mod vendor` was run
 - Vendor directory should not be manually modified
 
+## Tests
+- Changes must have accompanying unit tests
+- Bug fixes must include a regression test that would have caught the bug
+- Verify `make lint` and `make test` pass before approving
+
 ## Security
 - No hardcoded secrets, API keys, tokens, passwords, or internal company information in code
 - No secrets or internal URLs in commit messages or PR descriptions

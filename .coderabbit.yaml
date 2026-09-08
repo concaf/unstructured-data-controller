@@ -44,8 +44,11 @@ reviews:
 
     - path: "internal/controller/**/*.go"
       instructions: |
-        Review for controller-runtime and operator patterns. Reference: kubernetes-sigs/cluster-api, cert-manager/cert-manager.
-        Challenge patterns that contradict best practices even if they exist in this codebase — the existing handleError pattern double-logs (logs + returns), new code should not copy it.
+        Review for controller-runtime and operator patterns.
+        Reference: kubernetes-sigs/cluster-api, cert-manager.
+        Challenge patterns that contradict best practices even if
+        they exist in this codebase. The existing handleError pattern
+        double-logs (logs + returns) — new code should not copy it.
         - Reconciler struct embeds client.Client with Scheme *runtime.Scheme
         - SetupWithManager uses GenerationChangedPredicate{} on the primary resource
         - Status updates use controllerutils.StatusPatch — re-fetch object before mutating
@@ -56,7 +59,8 @@ reviews:
         - Import alias operatorv1alpha1 for API types
         - log.FromContext(ctx) for logging — never global loggers
         - Structured key-value pairs in log calls, never fmt.Sprintf in messages
-        - Variable names must be descriptive — no single-letter vars except i/j in loops, method receivers, ctx/err in tiny scopes
+        - Variable names must be descriptive — no single-letter vars
+          except i/j in loops, method receivers, ctx/err in tiny scopes
         - Name K8s objects by kind: crawlerDeployment, processorPod — not dep or p
         - Reconcilers must be idempotent and level-triggered (react to state, not events)
 
@@ -104,17 +108,22 @@ reviews:
     - path: "**/*.go"
       instructions: |
         General Go review — apply to all Go files.
-        This code is reviewed by humans. Flag missing comments on non-obvious decisions, conditional branches, fallbacks, retries, timeouts, and workarounds. Every choice should be explained with a comment so a future reader understands the intent without asking the author.
+        This code is reviewed by humans. Flag missing comments on
+        non-obvious decisions, branches, fallbacks, retries, timeouts,
+        and workarounds. Every choice should have a comment explaining
+        the intent so a future reader understands without asking.
         - Every error return must be checked. No _ = foo() for error-returning functions.
         - Always check if err != nil — never use if err == nil as the primary branch. Error path first.
         - Wrap errors with context using %w: fmt.Errorf("doing X: %w", err)
         - Handle errors once: either log OR return, never both.
         - Use errors.Is/errors.As for error matching, never string comparison.
-        - Variable names must be descriptive and reflect purpose. No single-letter vars except loop indices and tiny-scope ctx/err.
+        - Variable names must be descriptive. No single-letter vars
+          except loop indices and tiny-scope ctx/err.
         - Acronyms all-caps: ID, HTTP, URL, API.
         - Structured logging with key-value pairs, never fmt.Sprintf in log messages.
         - No fmt.Println or global loggers.
         - Flag any hardcoded secrets, API keys, tokens, internal URLs, or company-specific information.
+        - Changes must have accompanying tests. Bug fixes need regression tests.
         - Do not comment on import ordering, line length, or formatting — golangci-lint handles that.
 
   tools:
