@@ -42,6 +42,16 @@ Always use `make` targets instead of raw `go` commands — they include the righ
 - This is an open source project. Code, docs, and APIs should be usable by anyone — no assumptions about internal tooling, environments, or proprietary systems. Keep things generic and well-documented.
 - Never commit secrets, API keys, tokens, passwords, or internal company information in code, commits, or PRs.
 
+## Do Not
+
+- Do not edit `zz_generated.deepcopy.go` — it is auto-generated. Run `make manifests generate`.
+- Do not modify files in `vendor/` — run `go mod tidy && go mod vendor`.
+- Do not use raw `go build`, `go test`, `go vet`, `go fmt` — use the `make` targets.
+- Do not commit `.env`, `.pem`, `.key`, or any secret files.
+- Do not use `git push --force`, `git reset --hard`, `git clean`, or `git branch -D`.
+- Do not add dependencies without running `make lint` and `make test`.
+- Do not bypass pre-commit hooks with `--no-verify`.
+
 ## Go Style
 
 Write idiomatic Go. Follow Effective Go, Go Code Review Comments, and the Google Go Style Guide. Study the Go standard library (`net/http`, `io`, `context`) for patterns.
