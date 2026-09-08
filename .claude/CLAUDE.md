@@ -35,6 +35,7 @@ Write idiomatic Go. Follow Effective Go, Go Code Review Comments, and the Google
 ### Error Handling
 
 - Never ignore errors. Every `error` return must be checked — no `_, _ = foo()`.
+- Always check `if err != nil` — never use `if err == nil` as the primary branch. The error path comes first.
 - Wrap with context: `fmt.Errorf("creating deployment for crawler %s: %w", crawler.Name, err)`.
 - Handle errors once: either log OR return, never both. Double-logging makes debugging harder.
 - Use `errors.Is`/`errors.As` for matching, never string comparison or `==`.
@@ -66,6 +67,15 @@ Reference these well-written operators for patterns: kubernetes-sigs/cluster-api
 
 - Dumping all logic into `Reconcile()` — break into focused helper methods
 - Silently swallowing errors with `_ =`
+- Using `if err == nil` as the happy path — always guard with `if err != nil` first
 - Logging an error and also returning it (double-logging)
 - Overly broad RBAC — use minimum required verbs/resources
 - Making external API calls on every reconcile without checking generation/state
+
+## Security
+
+- Never commit secrets, API keys, tokens, passwords, or internal company information.
+- Never include secrets or internal URLs in PR descriptions, comments, or commit messages.
+- Use Kubernetes Secrets for sensitive configuration — never hardcode credentials in Go source.
+- Review `.gitignore` and `.dockerignore` before committing to ensure no sensitive files leak.
+- Pre-commit hooks include `detect-private-key` and `gitleaks` — do not bypass them.

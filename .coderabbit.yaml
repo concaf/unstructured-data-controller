@@ -104,6 +104,7 @@ reviews:
       instructions: |
         General Go review — apply to all Go files:
         - Every error return must be checked. No _ = foo() for error-returning functions.
+        - Always check if err != nil — never use if err == nil as the primary branch. Error path first.
         - Wrap errors with context using %w: fmt.Errorf("doing X: %w", err)
         - Handle errors once: either log OR return, never both.
         - Use errors.Is/errors.As for error matching, never string comparison.
@@ -111,6 +112,7 @@ reviews:
         - Acronyms all-caps: ID, HTTP, URL, API.
         - Structured logging with key-value pairs, never fmt.Sprintf in log messages.
         - No fmt.Println or global loggers.
+        - Flag any hardcoded secrets, API keys, tokens, internal URLs, or company-specific information.
         - Do not comment on import ordering, line length, or formatting — golangci-lint handles that.
 
   tools:
