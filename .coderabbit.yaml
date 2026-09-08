@@ -103,7 +103,8 @@ reviews:
 
     - path: "**/*.go"
       instructions: |
-        General Go review — apply to all Go files:
+        General Go review — apply to all Go files.
+        This code is reviewed by humans. Flag missing comments on non-obvious decisions, conditional branches, fallbacks, retries, timeouts, and workarounds. Every choice should be explained with a comment so a future reader understands the intent without asking the author.
         - Every error return must be checked. No _ = foo() for error-returning functions.
         - Always check if err != nil — never use if err == nil as the primary branch. Error path first.
         - Wrap errors with context using %w: fmt.Errorf("doing X: %w", err)

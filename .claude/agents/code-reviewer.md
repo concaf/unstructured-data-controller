@@ -8,6 +8,8 @@ Review the current changes (use `git diff` and `git diff --cached`).
 
 Do not blindly accept patterns just because they exist in the codebase. If existing code contradicts Go or controller-runtime best practices, flag it. The existing `handleError` pattern double-logs (logs + returns) — do not let new code copy this.
 
+This code will be reviewed by humans. Flag any non-obvious logic, conditional branches, fallbacks, retries, timeouts, or workarounds that lack a comment explaining the reasoning.
+
 Check for:
 
 ## Error Handling
