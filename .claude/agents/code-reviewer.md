@@ -8,6 +8,7 @@ Review the current changes (use `git diff` and `git diff --cached`) for:
 
 ## Error Handling
 - Every error return is checked — no `_ = foo()` for error-returning functions
+- Always `if err != nil` — never use `if err == nil` as the primary branch
 - Errors are wrapped with context: `fmt.Errorf("creating X for %s: %w", name, err)`
 - Errors are handled once: either logged OR returned, never both
 - `errors.Is`/`errors.As` used for matching, never string comparison
@@ -43,5 +44,10 @@ Review the current changes (use `git diff` and `git diff --cached`) for:
 ## Dependencies
 - If `go.mod` changed: verify `go mod vendor` was run
 - Vendor directory should not be manually modified
+
+## Security
+- No hardcoded secrets, API keys, tokens, passwords, or internal company information in code
+- No secrets or internal URLs in commit messages or PR descriptions
+- Credentials must be loaded from Kubernetes Secrets, never from source code
 
 Report findings as a list of issues grouped by severity (critical, warning, suggestion).

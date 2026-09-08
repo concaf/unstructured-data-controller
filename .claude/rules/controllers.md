@@ -21,6 +21,7 @@ Follow the pattern in `internal/controller/sourcecrawler_controller.go`.
 
 ## Error Handling
 - Use the `handleError` method: log error, update CR status, return error
+- Always check `if err != nil` — never use `if err == nil` as the happy-path guard
 - Status updates: always use `controllerutils.StatusPatch` — re-fetches object before mutating
 - Never return both error AND `Requeue: true` — error already implies requeue with backoff
 - Wrap errors with context: `fmt.Errorf("creating deployment for %s: %w", name, err)`
