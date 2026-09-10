@@ -27,7 +27,9 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 WORKDIR /
 COPY --from=builder /opt/app-root/src/manager .
+COPY entrypoint.sh /entrypoint.sh
 
 USER 65532:65532
 
-ENTRYPOINT ["/manager"]
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/manager"]

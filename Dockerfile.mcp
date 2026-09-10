@@ -27,7 +27,9 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 WORKDIR /
 COPY --from=builder /opt/app-root/src/unstructured-data-mcp-server .
+COPY entrypoint.sh /entrypoint.sh
 
 USER 65532:65532
 
-ENTRYPOINT ["/unstructured-data-mcp-server"]
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/unstructured-data-mcp-server"]

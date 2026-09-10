@@ -50,8 +50,9 @@ spec:
           type: RuntimeDefault
       containers:
       - command:
-        - /manager
+        - /entrypoint.sh
         args:
+        - /manager
         - --leader-elect
         - --health-probe-bind-address=:8081
         - --watch-namespace=$(WATCH_NAMESPACE)
@@ -92,24 +93,19 @@ spec:
         volumeMounts:
         - name: unstructured-datastore-cache-storage
           mountPath: /data/cache
-        # Mounts a custom CA bundle for trusting internal certificate authorities.
-        # On OpenShift, create a ConfigMap with the label
-        # config.openshift.io/inject-trustedcabundle: "true" — the platform
-        # populates it with the cluster's trusted CAs. Go binaries (CGO_ENABLED=0)
-        # read PEM certs directly from this path; no update-ca-trust needed.
-        # On non-OpenShift clusters, optional: true means this is a no-op and
-        # subPath preserves the original system CA bundle.
-        - name: trusted-ca-bundle
-          mountPath: /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
-          subPath: ca-bundle.crt
+        # Mount custom CA certs to be appended to the system bundle on startup.
+        # Create a ConfigMap named custom-ca-certs with PEM files to trust
+        # additional certificate authorities (e.g., internal corporate CAs).
+        - name: custom-ca-certs
+          mountPath: /etc/pki/ca-trust/source/anchors
           readOnly: true
       volumes:
       - name: unstructured-datastore-cache-storage
         persistentVolumeClaim:
           claimName: datastore-cache
-      - name: trusted-ca-bundle
+      - name: custom-ca-certs
         configMap:
-          name: trusted-ca-bundle
+          name: custom-ca-certs
           optional: true
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
