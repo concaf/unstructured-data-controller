@@ -1,8 +1,8 @@
 #!/bin/sh
-# Append any custom CA certificates to the system trust bundle.
-# Downstream deployments can mount a ConfigMap with PEM files to
-# /etc/pki/ca-trust/source/anchors/ to trust internal CAs at runtime.
+# Update the system CA trust store with any custom certificates mounted
+# to /etc/pki/ca-trust/source/anchors/. This makes custom CAs trusted
+# across the entire container (Go, curl, OpenSSL, etc.).
 if ls /etc/pki/ca-trust/source/anchors/*.pem >/dev/null 2>&1; then
-    cat /etc/pki/ca-trust/source/anchors/*.pem >> /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
+    update-ca-trust extract
 fi
 exec "$@"
