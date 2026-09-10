@@ -82,6 +82,13 @@ spec:
             drop:
             - "ALL"
 
+        # Mounts a custom CA bundle for trusting internal certificate authorities.
+        # On OpenShift, create a ConfigMap with the label
+        # config.openshift.io/inject-trustedcabundle: "true" — the platform
+        # populates it with the cluster's trusted CAs. Go binaries (CGO_ENABLED=0)
+        # read PEM certs directly from this path; no update-ca-trust needed.
+        # On non-OpenShift clusters, optional: true means this is a no-op and
+        # subPath preserves the original system CA bundle.
         volumeMounts:
         - name: trusted-ca-bundle
           mountPath: /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem
