@@ -16,6 +16,3 @@ images:
 - name: mcp-server
   newName: ghcr.io/gshikhar2021/unstructured-data-controller-mcp-server
   newTag: testing
-- name: unstructured-data-mcp-server
-  newName: ghcr.io/redhat-data-and-ai/unstructured-data-controller-mcp-server
-  newTag: latest
