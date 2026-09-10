@@ -30,7 +30,7 @@ COPY --from=builder /opt/app-root/src/manager .
 COPY entrypoint.sh /entrypoint.sh
 
 # Allow non-root user to update the CA trust store at runtime
-RUN chmod -R a+w /etc/pki/ca-trust/extracted/ /etc/pki/ca-trust/source/
+RUN chmod -R a+w /etc/pki/ca-trust/extracted/
 
 USER 65532:65532
 
