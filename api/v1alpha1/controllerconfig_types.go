@@ -79,6 +79,10 @@ type ControllerConfigSpec struct {
 	// +optional
 	NomicEndpoint string `json:"nomicEndpoint,omitempty"`
 
+	// gemini
+	// +optional
+	GeminiEndpoint string `json:"geminiEndpoint,omitempty"`
+
 	// google drive
 	// +optional
 	GoogleDriveConfig *GoogleDriveControllerConfig `json:"googleDriveConfig,omitempty"`

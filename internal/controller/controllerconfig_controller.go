@@ -138,11 +138,15 @@ func (r *ControllerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 	logger.Info("File store S3 client created ...")
 
-	// embedding model credentials
+	// embedding model credentials — endpoints from spec, API keys from secret
+	endpointOverrides := map[Model]string{
+		Model("nomic-ai/nomic-embed-text-v1.5"): config.Spec.NomicEndpoint,
+		Model("gemini-embedding-2"):             config.Spec.GeminiEndpoint,
+	}
 	for model, secretKeys := range modelMap {
-		endpoint := string(secret.Data[secretKeys.Endpoint])
-		if model == Model("nomic-ai/nomic-embed-text-v1.5") && config.Spec.NomicEndpoint != "" {
-			endpoint = config.Spec.NomicEndpoint
+		endpoint := endpointOverrides[model]
+		if endpoint == "" {
+			endpoint = string(secret.Data[secretKeys.Endpoint])
 		}
 		embeddingModelCredentials[model] = ModelCredentials{
 			Endpoint: endpoint,

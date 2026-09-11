@@ -60,6 +60,9 @@ spec:
               doclingServeURL:
                 description: docling
                 type: string
+              geminiEndpoint:
+                description: gemini
+                type: string
               googleDriveConfig:
                 description: google drive
                 properties:
