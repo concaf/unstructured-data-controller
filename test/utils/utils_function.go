@@ -26,7 +26,7 @@ func GetControllerConfigResource() *v1alpha1.ControllerConfig {
 			DoclingServeURL:             "http://docling-serve:5001",
 			DataStorageBucket:           "data-storage-bucket",
 			DataStorageBucketRegion:     "us-east-1",
-			DataStorageBucketEndpoint:   "http://localstack:4566",
+			DataStorageBucketEndpoint:   "http://localstack:4566", //nolint:revive // localstack uses HTTP
 			DataStorageDirectory:        "/data",
 			MaxConcurrentDoclingTasks:   3,
 			MaxConcurrentLangchainTasks: 3,
