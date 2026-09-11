@@ -49,9 +49,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-      - command:
-        - /entrypoint.sh
-        args:
+      - args:
         - /manager
         - --leader-elect
         - --health-probe-bind-address=:8081
