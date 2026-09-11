@@ -53,31 +53,45 @@ const (
 
 // ControllerConfigSpec defines the desired state of ControllerConfig.
 type ControllerConfigSpec struct {
-	SecretRef                   string `json:"secretRef,omitempty"`
-	MaxConcurrentDoclingTasks   int    `json:"maxConcurrentDoclingTasks,omitempty"`
-	MaxConcurrentLangchainTasks int    `json:"maxConcurrentLangchainTasks,omitempty"`
-	DoclingServeURL             string `json:"doclingServeURL,omitempty"`
-	// +optional
-	DoclingHTTPTimeout   *int   `json:"doclingHTTPTimeout,omitempty"`
-	DataStorageDirectory string `json:"dataStorageDirectory,omitempty"`
+	// secret
+	SecretRef string `json:"secretRef,omitempty"`
+
+	// data storage
 	DataStorageBucket    string `json:"dataStorageBucket,omitempty"`
-	// +kubebuilder:validation:Minimum=1
-	UnstructuredDataPipelineResyncInterval *int `json:"unstructuredDataPipelineResyncInterval,omitempty"`
+	DataStorageDirectory string `json:"dataStorageDirectory,omitempty"`
 	// +optional
 	DataStorageBucketEndpoint string `json:"dataStorageBucketEndpoint,omitempty"`
 	// +optional
 	DataStorageBucketRegion string `json:"dataStorageBucketRegion,omitempty"`
+
+	// docling
+	DoclingServeURL             string `json:"doclingServeURL,omitempty"`
+	MaxConcurrentDoclingTasks   int    `json:"maxConcurrentDoclingTasks,omitempty"`
+	MaxConcurrentLangchainTasks int    `json:"maxConcurrentLangchainTasks,omitempty"`
 	// +optional
-	NomicEndpoint string `json:"nomicEndpoint,omitempty"`
+	DoclingHTTPTimeout *int `json:"doclingHTTPTimeout,omitempty"`
+
+	// vlm
 	// +optional
 	VLMAPIURL string `json:"vlmAPIURL,omitempty"`
-	// GDriveConfig holds operator-level Google Drive crawling settings.
+
+	// nomic
+	// +optional
+	NomicEndpoint string `json:"nomicEndpoint,omitempty"`
+
+	// google drive
 	// +optional
 	GoogleDriveConfig *GoogleDriveControllerConfig `json:"googleDriveConfig,omitempty"`
-	// LDAPConfig holds LDAP configuration for user/group identity resolution.
+
+	// ldap
 	// +optional
 	LDAPConfig *LDAPConfig `json:"ldapConfig,omitempty"`
 
+	// pipeline
+	// +kubebuilder:validation:Minimum=1
+	UnstructuredDataPipelineResyncInterval *int `json:"unstructuredDataPipelineResyncInterval,omitempty"`
+
+	// deprecated
 	// Deprecated: use SecretRef instead.
 	// +optional
 	UnstructuredSecret string `json:"unstructuredSecret,omitempty"`
