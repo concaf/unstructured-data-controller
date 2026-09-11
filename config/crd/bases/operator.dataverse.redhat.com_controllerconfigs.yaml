@@ -54,6 +54,8 @@ spec:
                 type: integer
               doclingServeURL:
                 type: string
+              fileStoreAWSRegion:
+                type: string
               googleDriveConfig:
                 description: GDriveConfig holds operator-level Google Drive crawling
                   settings.
@@ -113,6 +115,8 @@ spec:
                 type: integer
               maxConcurrentLangchainTasks:
                 type: integer
+              nomicEndpoint:
+                type: string
               secretRef:
                 type: string
               snowflakeConfig:
@@ -152,6 +156,8 @@ spec:
                 type: object
               unstructuredSecret:
                 description: 'Deprecated: use SecretRef instead.'
+                type: string
+              vlmAPIURL:
                 type: string
             type: object
           status:

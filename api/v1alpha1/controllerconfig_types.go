@@ -63,6 +63,12 @@ type ControllerConfigSpec struct {
 	DataStorageBucket  string `json:"dataStorageBucket,omitempty"`
 	// +kubebuilder:validation:Minimum=1
 	UnstructuredDataPipelineResyncInterval *int `json:"unstructuredDataPipelineResyncInterval,omitempty"`
+	// +optional
+	FileStoreAWSRegion string `json:"fileStoreAWSRegion,omitempty"`
+	// +optional
+	NomicEndpoint string `json:"nomicEndpoint,omitempty"`
+	// +optional
+	VLMAPIURL string `json:"vlmAPIURL,omitempty"`
 	// GDriveConfig holds operator-level Google Drive crawling settings.
 	// +optional
 	GoogleDriveConfig *GoogleDriveControllerConfig `json:"googleDriveConfig,omitempty"`
