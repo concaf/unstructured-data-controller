@@ -48,6 +48,8 @@ spec:
             properties:
               dataStorageBucket:
                 type: string
+              dataStorageBucketEndpoint:
+                type: string
               dataStorageBucketRegion:
                 type: string
               dataStorageDirectory:
@@ -55,8 +57,6 @@ spec:
               doclingHTTPTimeout:
                 type: integer
               doclingServeURL:
-                type: string
-              fileStoreAWSEndpoint:
                 type: string
               googleDriveConfig:
                 description: GDriveConfig holds operator-level Google Drive crawling

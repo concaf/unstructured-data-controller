@@ -64,7 +64,7 @@ type ControllerConfigSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	UnstructuredDataPipelineResyncInterval *int `json:"unstructuredDataPipelineResyncInterval,omitempty"`
 	// +optional
-	FileStoreAWSEndpoint string `json:"fileStoreAWSEndpoint,omitempty"`
+	DataStorageBucketEndpoint string `json:"dataStorageBucketEndpoint,omitempty"`
 	// +optional
 	DataStorageBucketRegion string `json:"dataStorageBucketRegion,omitempty"`
 	// +optional
