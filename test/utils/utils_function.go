@@ -25,6 +25,8 @@ func GetControllerConfigResource() *v1alpha1.ControllerConfig {
 			SecretRef:                   "operator-secret",
 			DoclingServeURL:             "http://docling-serve:5001",
 			DataStorageBucket:           "data-storage-bucket",
+			DataStorageBucketRegion:     "us-east-1",
+			DataStorageBucketEndpoint:   "http://localstack:4566",
 			DataStorageDirectory:        "/data",
 			MaxConcurrentDoclingTasks:   3,
 			MaxConcurrentLangchainTasks: 3,

@@ -80,7 +80,7 @@ func (r *ControllerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	dataStorageBucket = config.Spec.DataStorageBucket
-	cacheDirectory = config.Spec.DataStorageDirectory
+	dataStorageDirectory = config.Spec.DataStorageDirectory
 
 	// fetch operator-level secret for filestore + docling credentials
 	secret := &corev1.Secret{}
@@ -112,7 +112,7 @@ func (r *ControllerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		MaxConcurrentRequests: int64(config.Spec.MaxConcurrentLangchainTasks),
 	})
 
-	logger.Info(fmt.Sprintf("Data storage bucket: %s, Data storage directory: %s", dataStorageBucket, cacheDirectory))
+	logger.Info(fmt.Sprintf("Data storage bucket: %s, Data storage directory: %s", dataStorageBucket, dataStorageDirectory))
 
 	// initialize filestore S3 client
 	fileStoreAwsConfig := awsclienthandler.AWSConfig{
