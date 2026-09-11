@@ -50,13 +50,13 @@ spec:
                 type: string
               dataStorageBucket:
                 type: string
+              dataStorageBucketRegion:
+                type: string
               doclingHTTPTimeout:
                 type: integer
               doclingServeURL:
                 type: string
               fileStoreAWSEndpoint:
-                type: string
-              fileStoreAWSRegion:
                 type: string
               googleDriveConfig:
                 description: GDriveConfig holds operator-level Google Drive crawling

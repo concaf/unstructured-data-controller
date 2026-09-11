@@ -66,7 +66,7 @@ type ControllerConfigSpec struct {
 	// +optional
 	FileStoreAWSEndpoint string `json:"fileStoreAWSEndpoint,omitempty"`
 	// +optional
-	FileStoreAWSRegion string `json:"fileStoreAWSRegion,omitempty"`
+	DataStorageBucketRegion string `json:"dataStorageBucketRegion,omitempty"`
 	// +optional
 	NomicEndpoint string `json:"nomicEndpoint,omitempty"`
 	// +optional
