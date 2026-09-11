@@ -58,9 +58,9 @@ type ControllerConfigSpec struct {
 	MaxConcurrentLangchainTasks int    `json:"maxConcurrentLangchainTasks,omitempty"`
 	DoclingServeURL             string `json:"doclingServeURL,omitempty"`
 	// +optional
-	DoclingHTTPTimeout *int   `json:"doclingHTTPTimeout,omitempty"`
-	CacheDirectory     string `json:"cacheDirectory,omitempty"`
-	DataStorageBucket  string `json:"dataStorageBucket,omitempty"`
+	DoclingHTTPTimeout   *int   `json:"doclingHTTPTimeout,omitempty"`
+	DataStorageDirectory string `json:"dataStorageDirectory,omitempty"`
+	DataStorageBucket    string `json:"dataStorageBucket,omitempty"`
 	// +kubebuilder:validation:Minimum=1
 	UnstructuredDataPipelineResyncInterval *int `json:"unstructuredDataPipelineResyncInterval,omitempty"`
 	// +optional

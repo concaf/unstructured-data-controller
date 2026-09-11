@@ -91,7 +91,7 @@ func (r *ControllerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	dataStorageBucket = config.Spec.DataStorageBucket
-	cacheDirectory = config.Spec.CacheDirectory
+	cacheDirectory = config.Spec.DataStorageDirectory
 
 	// fetch operator-level secret for filestore + docling credentials
 	secret := &corev1.Secret{}

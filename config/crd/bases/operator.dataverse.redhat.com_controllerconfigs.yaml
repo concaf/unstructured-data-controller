@@ -46,11 +46,11 @@ spec:
           spec:
             description: ControllerConfigSpec defines the desired state of ControllerConfig.
             properties:
-              cacheDirectory:
-                type: string
               dataStorageBucket:
                 type: string
               dataStorageBucketRegion:
+                type: string
+              dataStorageDirectory:
                 type: string
               doclingHTTPTimeout:
                 type: integer
