@@ -54,6 +54,8 @@ spec:
                 type: integer
               doclingServeURL:
                 type: string
+              fileStoreAWSEndpoint:
+                type: string
               fileStoreAWSRegion:
                 type: string
               googleDriveConfig:

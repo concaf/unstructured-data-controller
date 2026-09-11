@@ -64,6 +64,8 @@ type ControllerConfigSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	UnstructuredDataPipelineResyncInterval *int `json:"unstructuredDataPipelineResyncInterval,omitempty"`
 	// +optional
+	FileStoreAWSEndpoint string `json:"fileStoreAWSEndpoint,omitempty"`
+	// +optional
 	FileStoreAWSRegion string `json:"fileStoreAWSRegion,omitempty"`
 	// +optional
 	NomicEndpoint string `json:"nomicEndpoint,omitempty"`
