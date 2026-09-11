@@ -239,13 +239,15 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	PVC_SIZE=${PVC_SIZE} envsubst < config/manager/pvc.yaml | sponge config/manager/pvc.yaml
-	cd config/deploy && $(KUSTOMIZE) edit set image controller=${IMG} && $(KUSTOMIZE) edit set namespace "${DEPLOYMENT_NAMESPACE}"	$(KUSTOMIZE) build config/deploy | $(KUBECTL) apply -f -
+	cd config/deploy && $(KUSTOMIZE) edit set image controller=${IMG} && $(KUSTOMIZE) edit set namespace "${DEPLOYMENT_NAMESPACE}"
+	$(KUSTOMIZE) build config/deploy | $(KUBECTL) apply -f -
 	git restore config/manager/pvc.yaml
 
 .PHONY: generate-deploy-manifests
 generate-deploy-manifests: manifests kustomize
 	PVC_SIZE=${PVC_SIZE} envsubst < config/manager/pvc.yaml | sponge config/manager/pvc.yaml
-	cd config/deploy && $(KUSTOMIZE) edit set image controller=${IMG} && $(KUSTOMIZE) edit set namespace "${DEPLOYMENT_NAMESPACE}"	$(KUSTOMIZE) build config/deploy -o ${OUTPUT_FILE}
+	cd config/deploy && $(KUSTOMIZE) edit set image controller=${IMG} && $(KUSTOMIZE) edit set namespace "${DEPLOYMENT_NAMESPACE}"
+	$(KUSTOMIZE) build config/deploy -o ${OUTPUT_FILE}
 	git restore config/manager/pvc.yaml
 
 .PHONY: undeploy
