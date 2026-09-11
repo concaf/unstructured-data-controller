@@ -47,6 +47,21 @@ type ModelCredentials struct {
 	APIKey   string
 }
 
+type modelSecretKeys struct {
+	EndpointKey string
+	APIKeyKey   string
+}
+
+var modelMap = map[Model]modelSecretKeys{
+	Model("nomic-ai/nomic-embed-text-v1.5"): {
+		APIKeyKey: "NOMIC_API_KEY",
+	},
+	Model("gemini-embedding-2"): {
+		EndpointKey: "GEMINI_ENDPOINT",
+		APIKeyKey:   "GEMINI_API_KEY",
+	},
+}
+
 var (
 	doclingClient                          *docling.Client
 	langchainClient                        *langchain.Client
@@ -127,14 +142,16 @@ func (r *ControllerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 	logger.Info("File store S3 client created ...")
 
-	// embedding model credentials — endpoints from spec, API keys from secret
-	embeddingModelCredentials[Model("nomic-ai/nomic-embed-text-v1.5")] = ModelCredentials{
-		Endpoint: config.Spec.NomicEndpoint,
-		APIKey:   string(secret.Data["NOMIC_API_KEY"]),
-	}
-	embeddingModelCredentials[Model("gemini-embedding-2")] = ModelCredentials{
-		Endpoint: string(secret.Data["GEMINI_ENDPOINT"]),
-		APIKey:   string(secret.Data["GEMINI_API_KEY"]),
+	// embedding model credentials — endpoints from spec or secret, API keys from secret
+	for model, keys := range modelMap {
+		endpoint := string(secret.Data[keys.EndpointKey])
+		if model == Model("nomic-ai/nomic-embed-text-v1.5") && config.Spec.NomicEndpoint != "" {
+			endpoint = config.Spec.NomicEndpoint
+		}
+		embeddingModelCredentials[model] = ModelCredentials{
+			Endpoint: endpoint,
+			APIKey:   string(secret.Data[keys.APIKeyKey]),
+		}
 	}
 
 	// VLM credentials for picture description
