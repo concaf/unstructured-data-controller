@@ -27,7 +27,7 @@ func GetControllerConfigResource() *v1alpha1.ControllerConfig {
 			DataStorageBucket:           "data-storage-bucket",
 			DataStorageBucketRegion:     "us-east-1",
 			DataStorageBucketEndpoint:   "http://localstack:4566", //nolint:revive // localstack uses HTTP
-			DataStorageDirectory:        "/data",
+			DataStorageDirectory:        "/data/storage",
 			MaxConcurrentDoclingTasks:   3,
 			MaxConcurrentLangchainTasks: 3,
 		},

@@ -90,7 +90,7 @@ spec:
             memory: 1Gi
         volumeMounts:
         - name: unstructured-datastore-cache-storage
-          mountPath: /data
+          mountPath: /data/storage
         # Mount custom CA certs to be appended to the system bundle on startup.
         # Create a ConfigMap named custom-ca-certs with PEM files to trust
         # additional certificate authorities (e.g., internal corporate CAs).
