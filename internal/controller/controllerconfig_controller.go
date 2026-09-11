@@ -47,17 +47,6 @@ type ModelCredentials struct {
 	APIKey   string
 }
 
-var modelMap = map[Model]ModelCredentials{
-	Model("nomic-ai/nomic-embed-text-v1.5"): {
-		Endpoint: "NOMIC_ENDPOINT",
-		APIKey:   "NOMIC_API_KEY",
-	},
-	Model("gemini-embedding-2"): {
-		Endpoint: "GEMINI_ENDPOINT",
-		APIKey:   "GEMINI_API_KEY",
-	},
-}
-
 var (
 	doclingClient                          *docling.Client
 	langchainClient                        *langchain.Client
@@ -123,32 +112,34 @@ func (r *ControllerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		MaxConcurrentRequests: int64(config.Spec.MaxConcurrentLangchainTasks),
 	})
 
-	logger.Info(fmt.Sprintf("Data storage bucket: %s, Cache directory: %s", dataStorageBucket, cacheDirectory))
+	logger.Info(fmt.Sprintf("Data storage bucket: %s, Data storage directory: %s", dataStorageBucket, cacheDirectory))
 
 	// initialize filestore S3 client
 	fileStoreAwsConfig := awsclienthandler.AWSConfig{
-		Region:          string(secret.Data["FILE_STORE_AWS_REGION"]),
+		Region:          config.Spec.DataStorageBucketRegion,
 		AccessKeyID:     string(secret.Data["FILE_STORE_AWS_ACCESS_KEY_ID"]),
 		SecretAccessKey: string(secret.Data["FILE_STORE_AWS_SECRET_ACCESS_KEY"]),
 		SessionToken:    string(secret.Data["FILE_STORE_AWS_SESSION_TOKEN"]),
-		Endpoint:        string(secret.Data["FILE_STORE_AWS_ENDPOINT"]),
+		Endpoint:        config.Spec.DataStorageBucketEndpoint,
 	}
 	if err := awsclienthandler.NewFileStoreS3ClientFromConfig(ctx, &fileStoreAwsConfig); err != nil {
 		return ctrl.Result{}, err
 	}
 	logger.Info("File store S3 client created ...")
 
-	// embedding model credentials
-	for model, secretKeys := range modelMap {
-		embeddingModelCredentials[model] = ModelCredentials{
-			Endpoint: string(secret.Data[secretKeys.Endpoint]),
-			APIKey:   string(secret.Data[secretKeys.APIKey]),
-		}
+	// embedding model credentials — endpoints from spec, API keys from secret
+	embeddingModelCredentials[Model("nomic-ai/nomic-embed-text-v1.5")] = ModelCredentials{
+		Endpoint: config.Spec.NomicEndpoint,
+		APIKey:   string(secret.Data["NOMIC_API_KEY"]),
+	}
+	embeddingModelCredentials[Model("gemini-embedding-2")] = ModelCredentials{
+		Endpoint: string(secret.Data["GEMINI_ENDPOINT"]),
+		APIKey:   string(secret.Data["GEMINI_API_KEY"]),
 	}
 
 	// VLM credentials for picture description
 	vlmAPIKey = string(secret.Data["VLM_API_KEY"])
-	vlmAPIURL = string(secret.Data["VLM_API_URL"])
+	vlmAPIURL = config.Spec.VLMAPIURL
 
 	// initialize LDAP client and cache if configured
 	if config.Spec.LDAPConfig != nil && config.Spec.LDAPConfig.Server != "" {
