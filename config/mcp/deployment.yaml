@@ -82,4 +82,18 @@ spec:
             drop:
             - "ALL"
 
+        # Mount custom CA certs to be appended to the system bundle on startup.
+        # Create a ConfigMap named custom-ca-certs with PEM files to trust
+        # additional certificate authorities (e.g., internal corporate CAs).
+        volumeMounts:
+        - name: custom-ca-certs
+          mountPath: /etc/pki/ca-trust/source/anchors
+          readOnly: true
+
+      volumes:
+      - name: custom-ca-certs
+        configMap:
+          name: custom-ca-certs
+          optional: true
+
       restartPolicy: Always

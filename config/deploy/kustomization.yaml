@@ -1,5 +1,3 @@
-nameSuffix: -test
-
 namePrefix: unstructured-
 
 namespace: unstructured-controller-namespace

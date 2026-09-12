@@ -91,7 +91,7 @@ func (r *ControllerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	dataStorageBucket = config.Spec.DataStorageBucket
-	cacheDirectory = config.Spec.CacheDirectory
+	dataStorageDirectory = config.Spec.DataStorageDirectory
 
 	// fetch operator-level secret for filestore + docling credentials
 	secret := &corev1.Secret{}
@@ -123,32 +123,36 @@ func (r *ControllerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		MaxConcurrentRequests: int64(config.Spec.MaxConcurrentLangchainTasks),
 	})
 
-	logger.Info(fmt.Sprintf("Data storage bucket: %s, Cache directory: %s", dataStorageBucket, cacheDirectory))
+	logger.Info(fmt.Sprintf("Data storage bucket: %s, Data storage directory: %s", dataStorageBucket, dataStorageDirectory))
 
 	// initialize filestore S3 client
 	fileStoreAwsConfig := awsclienthandler.AWSConfig{
-		Region:          string(secret.Data["FILE_STORE_AWS_REGION"]),
+		Region:          config.Spec.DataStorageBucketRegion,
 		AccessKeyID:     string(secret.Data["FILE_STORE_AWS_ACCESS_KEY_ID"]),
 		SecretAccessKey: string(secret.Data["FILE_STORE_AWS_SECRET_ACCESS_KEY"]),
 		SessionToken:    string(secret.Data["FILE_STORE_AWS_SESSION_TOKEN"]),
-		Endpoint:        string(secret.Data["FILE_STORE_AWS_ENDPOINT"]),
+		Endpoint:        config.Spec.DataStorageBucketEndpoint,
 	}
 	if err := awsclienthandler.NewFileStoreS3ClientFromConfig(ctx, &fileStoreAwsConfig); err != nil {
 		return ctrl.Result{}, err
 	}
 	logger.Info("File store S3 client created ...")
 
-	// embedding model credentials
+	// embedding model credentials — endpoints from spec, API keys from secret
+	endpointFromSpec := map[Model]string{
+		Model("nomic-ai/nomic-embed-text-v1.5"): config.Spec.NomicEndpoint,
+		Model("gemini-embedding-2"):             config.Spec.GeminiEndpoint,
+	}
 	for model, secretKeys := range modelMap {
 		embeddingModelCredentials[model] = ModelCredentials{
-			Endpoint: string(secret.Data[secretKeys.Endpoint]),
+			Endpoint: endpointFromSpec[model],
 			APIKey:   string(secret.Data[secretKeys.APIKey]),
 		}
 	}
 
 	// VLM credentials for picture description
 	vlmAPIKey = string(secret.Data["VLM_API_KEY"])
-	vlmAPIURL = string(secret.Data["VLM_API_URL"])
+	vlmAPIURL = config.Spec.VLMAPIURL
 
 	// initialize LDAP client and cache if configured
 	if config.Spec.LDAPConfig != nil && config.Spec.LDAPConfig.Server != "" {

@@ -212,11 +212,6 @@ func (in *ControllerConfigSpec) DeepCopyInto(out *ControllerConfigSpec) {
 		*out = new(int)
 		**out = **in
 	}
-	if in.UnstructuredDataPipelineResyncInterval != nil {
-		in, out := &in.UnstructuredDataPipelineResyncInterval, &out.UnstructuredDataPipelineResyncInterval
-		*out = new(int)
-		**out = **in
-	}
 	if in.GoogleDriveConfig != nil {
 		in, out := &in.GoogleDriveConfig, &out.GoogleDriveConfig
 		*out = new(GoogleDriveControllerConfig)
@@ -226,6 +221,11 @@ func (in *ControllerConfigSpec) DeepCopyInto(out *ControllerConfigSpec) {
 		in, out := &in.LDAPConfig, &out.LDAPConfig
 		*out = new(LDAPConfig)
 		(*in).DeepCopyInto(*out)
+	}
+	if in.UnstructuredDataPipelineResyncInterval != nil {
+		in, out := &in.UnstructuredDataPipelineResyncInterval, &out.UnstructuredDataPipelineResyncInterval
+		*out = new(int)
+		**out = **in
 	}
 	if in.SnowflakeConfig != nil {
 		in, out := &in.SnowflakeConfig, &out.SnowflakeConfig

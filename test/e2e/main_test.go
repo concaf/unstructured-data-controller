@@ -49,7 +49,7 @@ var (
 
 const (
 	testNamespace          = "unstructured-controller-namespace"
-	deploymentName         = "unstructured-controller-manager-test"
+	deploymentName         = "unstructured-controller-manager"
 	unstructuredSecretName = "unstructured-secret"
 )
 

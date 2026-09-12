@@ -43,8 +43,8 @@ const (
 )
 
 var (
-	cacheDirectory    string
-	dataStorageBucket string
+	dataStorageDirectory string
+	dataStorageBucket    string
 )
 
 // UnstructuredDataPipelineReconciler reconciles a UnstructuredDataPipeline object

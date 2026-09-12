@@ -46,17 +46,25 @@ spec:
           spec:
             description: ControllerConfigSpec defines the desired state of ControllerConfig.
             properties:
-              cacheDirectory:
-                type: string
               dataStorageBucket:
+                description: data storage
+                type: string
+              dataStorageBucketEndpoint:
+                type: string
+              dataStorageBucketRegion:
+                type: string
+              dataStorageDirectory:
                 type: string
               doclingHTTPTimeout:
                 type: integer
               doclingServeURL:
+                description: docling
+                type: string
+              geminiEndpoint:
+                description: gemini
                 type: string
               googleDriveConfig:
-                description: GDriveConfig holds operator-level Google Drive crawling
-                  settings.
+                description: google drive
                 properties:
                   concurrentDownloads:
                     description: ConcurrentDownloads is the maximum number of files
@@ -72,8 +80,7 @@ spec:
                     type: integer
                 type: object
               ldapConfig:
-                description: LDAPConfig holds LDAP configuration for user/group identity
-                  resolution.
+                description: ldap
                 properties:
                   attributes:
                     description: Attributes is the list of LDAP attributes to retrieve.
@@ -113,7 +120,11 @@ spec:
                 type: integer
               maxConcurrentLangchainTasks:
                 type: integer
+              nomicEndpoint:
+                description: nomic
+                type: string
               secretRef:
+                description: secret
                 type: string
               snowflakeConfig:
                 description: 'Deprecated: fields are now top-level on ControllerConfigSpec.'
@@ -132,6 +143,7 @@ spec:
                     type: string
                 type: object
               unstructuredDataPipelineResyncInterval:
+                description: pipeline
                 minimum: 1
                 type: integer
               unstructuredDataProcessingConfig:
@@ -151,7 +163,12 @@ spec:
                     type: integer
                 type: object
               unstructuredSecret:
-                description: 'Deprecated: use SecretRef instead.'
+                description: |-
+                  deprecated
+                  Deprecated: use SecretRef instead.
+                type: string
+              vlmAPIURL:
+                description: vlm
                 type: string
             type: object
           status:

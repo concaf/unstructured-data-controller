@@ -27,7 +27,12 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 WORKDIR /
 COPY --from=builder /opt/app-root/src/manager .
+COPY entrypoint.sh /entrypoint.sh
+
+# Allow non-root user to update the CA trust store at runtime
+RUN chmod -R a+w /etc/pki/ca-trust/extracted/
 
 USER 65532:65532
 
-ENTRYPOINT ["/manager"]
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/manager"]

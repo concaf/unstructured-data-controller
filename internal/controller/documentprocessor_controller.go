@@ -145,7 +145,7 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		doclingCfg.PictureDescriptionAPI.Headers["Authorization"] = "Bearer " + strings.TrimSpace(vlmAPIKey)
 	}
 
-	fs, err := filestore.New(ctx, cacheDirectory, dataStorageBucket)
+	fs, err := filestore.New(ctx, dataStorageDirectory, dataStorageBucket)
 	if err != nil {
 		if IsAWSClientNotInitializedError(err) {
 			logger.Info("ControllerConfig has not initialized AWS clients yet, will try again in a bit ...")
