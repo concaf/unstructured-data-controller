@@ -88,6 +88,19 @@ func (r *ChunksGeneratorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		logger.Error(err, "failed to get ChunksGenerator CR")
 		return ctrl.Result{}, err
 	}
+
+	// Skip reconciliation if the spec hasn't changed since the last successful run.
+	// This avoids redundant work during pod restarts when the informer re-lists all CRs.
+	if controllerutils.IsAlreadyReconciled(
+		chunksGeneratorCR.Generation,
+		chunksGeneratorCR.Status.LastAppliedGeneration,
+		chunksGeneratorCR.Status.Conditions,
+		operatorv1alpha1.ChunksGeneratorCondition,
+	) {
+		logger.V(1).Info("already reconciled for current generation, skipping")
+		return ctrl.Result{}, nil
+	}
+
 	chunksGeneratorCR = chunksGeneratorCR.DeepCopy()
 	chunksGeneratorCR.Spec.ChunksGeneratorConfig.SetDefaults()
 

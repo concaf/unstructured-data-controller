@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/httpretry"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -103,26 +105,34 @@ func (c *HTTPClient) GenerateEmbeddings(
 		return nil, fmt.Errorf("failed to marshal embedding request: %w", err)
 	}
 
-	// TODO: Add a better log statement
 	logger.Info("sending embedding request")
-	req, err := c.createHTTPRequest(ctx, http.MethodPost, c.Config.Endpoint, payload)
+
+	// Send the request with capped exponential backoff for transient HTTP errors
+	// (429, 5xx). Non-retryable errors (400, 401, 404) fail immediately.
+	var resp *http.Response
+	var body []byte
+	err = retry.OnError(httpretry.ExternalServiceBackoff, httpretry.IsRetryableHTTPError, func() error {
+		req, reqErr := c.createHTTPRequest(ctx, http.MethodPost, c.Config.Endpoint, payload)
+		if reqErr != nil {
+			return reqErr
+		}
+		resp, reqErr = c.Client.Do(req)
+		if reqErr != nil {
+			return fmt.Errorf("failed to send embedding request: %w", reqErr)
+		}
+		body, reqErr = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if reqErr != nil {
+			return fmt.Errorf("failed to read embedding response: %w", reqErr)
+		}
+		if retryableErr := httpretry.CheckResponseForRetryableError(resp.StatusCode); retryableErr != nil {
+			logger.Info("embedding API returned retryable status, will retry", "statusCode", resp.StatusCode)
+			return retryableErr
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-
-	resp, err := c.Client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send embedding request: %w", err)
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			logger.Error(err, "failed to close response body")
-		}
-	}()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read embedding response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {

@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
@@ -25,6 +26,8 @@ import (
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -32,6 +35,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -40,6 +45,7 @@ import (
 
 	operatorv1alpha1 "github.com/redhat-data-and-ai/unstructured-data-controller/api/v1alpha1"
 	"github.com/redhat-data-and-ai/unstructured-data-controller/internal/controller"
+	"github.com/redhat-data-and-ai/unstructured-data-controller/internal/controller/controllerutils"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -181,7 +187,15 @@ func main() {
 		})
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	// Read ControllerConfig before creating the manager to configure per-controller
+	// concurrency. Uses a direct client since the manager (and its cache) doesn't exist yet.
+	// This is the pattern used by Cluster API and cert-manager — concurrency is set at
+	// startup and changes take effect on the next pod restart.
+	restConfig := ctrl.GetConfigOrDie()
+	groupKindConcurrency := readReconcilerConcurrencyFromConfig(restConfig, watchNamespace)
+	setupLog.Info("configured per-controller concurrency", "groupKindConcurrency", groupKindConcurrency)
+
+	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
@@ -192,6 +206,13 @@ func main() {
 			DefaultNamespaces: map[string]cache.Config{
 				watchNamespace: {},
 			},
+		},
+		Controller: config.Controller{
+			GroupKindConcurrency: groupKindConcurrency,
+			// Start informer caches before winning leader election so they are
+			// warm when the pod becomes leader. Reduces time-to-first-reconcile
+			// on failover.
+			EnableWarmup: ptr.To(true),
 		},
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
@@ -294,4 +315,29 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// readReconcilerConcurrencyFromConfig reads the ControllerConfig CR before the
+// manager starts and builds a GroupKindConcurrency map for per-controller
+// concurrency. Falls back to defaults if the CR doesn't exist yet (e.g., first deploy).
+func readReconcilerConcurrencyFromConfig(restConfig *rest.Config, namespace string) map[string]int {
+	directClient, err := client.New(restConfig, client.Options{Scheme: scheme})
+	if err != nil {
+		setupLog.Info("could not create direct client for concurrency config, using defaults", "error", err)
+		return controllerutils.BuildGroupKindConcurrency(nil)
+	}
+
+	controllerConfigList := &operatorv1alpha1.ControllerConfigList{}
+	if err := directClient.List(context.Background(), controllerConfigList, client.InNamespace(namespace)); err != nil {
+		setupLog.Info("could not read ControllerConfig for concurrency settings, using defaults", "error", err)
+		return controllerutils.BuildGroupKindConcurrency(nil)
+	}
+
+	if len(controllerConfigList.Items) == 0 {
+		setupLog.Info("no ControllerConfig CR found, using default concurrency settings")
+		return controllerutils.BuildGroupKindConcurrency(nil)
+	}
+
+	controllerConfig := controllerConfigList.Items[0]
+	return controllerutils.BuildGroupKindConcurrency(controllerConfig.Spec.ReconcilerConcurrency)
 }
