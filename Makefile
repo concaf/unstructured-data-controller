@@ -8,7 +8,6 @@ VERSION ?= 0.0.1
 OUTPUT_FILE ?= manifest.yaml
 MCP_SERVER_OUTPUT_FILE ?= mcp-server-manifest.yaml
 DEPLOYMENT_NAMESPACE ?= unstructured-controller-namespace
-PVC_SIZE ?= 10Gi
 
 # CHANNELS define the bundle channels used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
@@ -238,17 +237,13 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	PVC_SIZE=${PVC_SIZE} envsubst < config/manager/pvc.yaml | sponge config/manager/pvc.yaml
 	cd config/deploy && $(KUSTOMIZE) edit set image controller=${IMG} && $(KUSTOMIZE) edit set namespace "${DEPLOYMENT_NAMESPACE}"
 	$(KUSTOMIZE) build config/deploy | $(KUBECTL) apply -f -
-	git restore config/manager/pvc.yaml
 
 .PHONY: generate-deploy-manifests
 generate-deploy-manifests: manifests kustomize
-	PVC_SIZE=${PVC_SIZE} envsubst < config/manager/pvc.yaml | sponge config/manager/pvc.yaml
 	cd config/deploy && $(KUSTOMIZE) edit set image controller=${IMG} && $(KUSTOMIZE) edit set namespace "${DEPLOYMENT_NAMESPACE}"
 	$(KUSTOMIZE) build config/deploy -o ${OUTPUT_FILE}
-	git restore config/manager/pvc.yaml
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
