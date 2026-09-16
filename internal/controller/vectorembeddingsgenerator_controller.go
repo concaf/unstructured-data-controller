@@ -79,6 +79,19 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 		logger.Error(err, "failed to get VectorEmbeddingsGenerator CR")
 		return ctrl.Result{}, err
 	}
+
+	// Skip reconciliation if the spec hasn't changed since the last successful run.
+	// This avoids redundant work during pod restarts when the informer re-lists all CRs.
+	if controllerutils.IsAlreadyReconciled(
+		vectorEmbeddingsGeneratorCR.Generation,
+		vectorEmbeddingsGeneratorCR.Status.LastAppliedGeneration,
+		vectorEmbeddingsGeneratorCR.Status.Conditions,
+		operatorv1alpha1.VectorEmbeddingGenerationConditionType,
+	) {
+		logger.V(1).Info("already reconciled for current generation, skipping")
+		return ctrl.Result{}, nil
+	}
+
 	vectorEmbeddingsGeneratorCR = vectorEmbeddingsGeneratorCR.DeepCopy()
 	vectorEmbeddingsGeneratorCR.Spec.VectorEmbeddingsGeneratorConfig.SetDefaults()
 
