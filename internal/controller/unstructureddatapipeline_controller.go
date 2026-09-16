@@ -86,6 +86,19 @@ func (r *UnstructuredDataPipelineReconciler) Reconcile(ctx context.Context, req 
 		logger.Error(err, "failed to get UnstructuredDataPipeline CR")
 		return ctrl.Result{}, err
 	}
+
+	// Skip reconciliation if the spec hasn't changed since the last successful run.
+	// This avoids redundant work during pod restarts when the informer re-lists all CRs.
+	if controllerutils.IsAlreadyReconciled(
+		unstructuredDataPipelineCR.Generation,
+		unstructuredDataPipelineCR.Status.LastAppliedGeneration,
+		unstructuredDataPipelineCR.Status.Conditions,
+		operatorv1alpha1.UnstructuredDataPipelineCondition,
+	) {
+		logger.V(1).Info("already reconciled for current generation, skipping")
+		return ctrl.Result{}, nil
+	}
+
 	// DeepCopy to avoid mutating the shared informer cache
 	unstructuredDataPipelineCR = unstructuredDataPipelineCR.DeepCopy()
 

@@ -81,6 +81,18 @@ func (r *SourceCrawlerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
+	// Skip reconciliation if the spec hasn't changed since the last successful run.
+	// This avoids redundant work during pod restarts when the informer re-lists all CRs.
+	if controllerutils.IsAlreadyReconciled(
+		sourceCrawlerCR.Generation,
+		sourceCrawlerCR.Status.LastAppliedGeneration,
+		sourceCrawlerCR.Status.Conditions,
+		operatorv1alpha1.SourceCrawlerCondition,
+	) {
+		logger.V(1).Info("already reconciled for current generation, skipping")
+		return ctrl.Result{}, nil
+	}
+
 	if err := controllerutils.StatusPatch(ctx, r.Client, sourceCrawlerCR, func() {
 		sourceCrawlerCR.SetWaiting()
 	}); err != nil {

@@ -95,6 +95,12 @@ type ControllerConfigSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	UnstructuredDataPipelineResyncInterval *int `json:"unstructuredDataPipelineResyncInterval,omitempty"`
 
+	// reconcilerConcurrency configures the number of concurrent reconcile workers
+	// per controller. Higher values speed up reconciliation when there are many CRs
+	// but increase load on external services. Changes take effect on next pod restart.
+	// +optional
+	ReconcilerConcurrency *ReconcilerConcurrency `json:"reconcilerConcurrency,omitempty"`
+
 	// deprecated
 	// Deprecated: This field is no longer used and will be removed in a future release.
 	// +optional
@@ -108,6 +114,29 @@ type ControllerConfigSpec struct {
 	// Deprecated: fields are now top-level on ControllerConfigSpec.
 	// +optional
 	UnstructuredDataProcessingConfig *UnstructuredDataProcessingConfigSpec `json:"unstructuredDataProcessingConfig,omitempty"`
+}
+
+// ReconcilerConcurrency configures the maximum number of concurrent reconcile
+// workers for each controller. Defaults are used when fields are omitted.
+type ReconcilerConcurrency struct {
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	UnstructuredDataPipeline *int `json:"unstructuredDataPipeline,omitempty"`
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	DocumentProcessor *int `json:"documentProcessor,omitempty"`
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	ChunksGenerator *int `json:"chunksGenerator,omitempty"`
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	VectorEmbeddingsGenerator *int `json:"vectorEmbeddingsGenerator,omitempty"`
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	SourceCrawler *int `json:"sourceCrawler,omitempty"`
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	DestinationSyncer *int `json:"destinationSyncer,omitempty"`
 }
 
 // Deprecated: SnowflakeConfig is no longer used.

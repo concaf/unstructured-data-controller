@@ -128,6 +128,31 @@ spec:
               nomicEndpoint:
                 description: nomic
                 type: string
+              reconcilerConcurrency:
+                description: |-
+                  reconcilerConcurrency configures the number of concurrent reconcile workers
+                  per controller. Higher values speed up reconciliation when there are many CRs
+                  but increase load on external services. Changes take effect on next pod restart.
+                properties:
+                  chunksGenerator:
+                    minimum: 1
+                    type: integer
+                  destinationSyncer:
+                    minimum: 1
+                    type: integer
+                  documentProcessor:
+                    minimum: 1
+                    type: integer
+                  sourceCrawler:
+                    minimum: 1
+                    type: integer
+                  unstructuredDataPipeline:
+                    minimum: 1
+                    type: integer
+                  vectorEmbeddingsGenerator:
+                    minimum: 1
+                    type: integer
+                type: object
               secretRef:
                 description: secret
                 type: string

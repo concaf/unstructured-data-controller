@@ -83,6 +83,19 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		logger.Error(err, "failed to get DocumentProcessor CR")
 		return ctrl.Result{}, err
 	}
+
+	// Skip reconciliation if the spec hasn't changed since the last successful run.
+	// This avoids redundant work during pod restarts when the informer re-lists all CRs.
+	if controllerutils.IsAlreadyReconciled(
+		documentProcessorCR.Generation,
+		documentProcessorCR.Status.LastAppliedGeneration,
+		documentProcessorCR.Status.Conditions,
+		operatorv1alpha1.DocumentProcessorCondition,
+	) {
+		logger.V(1).Info("already reconciled for current generation, skipping")
+		return ctrl.Result{}, nil
+	}
+
 	documentProcessorCR = documentProcessorCR.DeepCopy()
 	documentProcessorCR.Spec.DocumentProcessorConfig.SetDefaults()
 

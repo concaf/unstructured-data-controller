@@ -27,7 +27,9 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/httpretry"
 	"golang.org/x/sync/semaphore"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -186,29 +188,43 @@ func (c *Client) createHTTPRequest(ctx context.Context, method, endpoint string,
 func (c *Client) createDoclingRequest(ctx context.Context, method, endpoint string, payload []byte) (
 	io.ReadCloser, error) {
 	logger := log.FromContext(ctx)
-	client := &http.Client{
+	httpClient := &http.Client{
 		Timeout: c.ClientConfig.HTTPTimeout,
 	}
 
-	req, err := c.createHTTPRequest(ctx, method, endpoint, payload, "Bearer %s")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+	// sendWithRetry wraps an HTTP request with capped exponential backoff.
+	// Retries on transient errors (429, 5xx); returns immediately on success or
+	// non-retryable errors (400, 401, 404, etc.).
+	var resp *http.Response
+	sendWithRetry := func(authFormat string) error {
+		return retry.OnError(httpretry.ExternalServiceBackoff, httpretry.IsRetryableHTTPError, func() error {
+			req, err := c.createHTTPRequest(ctx, method, endpoint, payload, authFormat)
+			if err != nil {
+				return fmt.Errorf("failed to create request: %w", err)
+			}
+			logger.Info("sending request to docling service", "url", endpoint)
+			resp, err = httpClient.Do(req)
+			if err != nil {
+				return fmt.Errorf("failed to send request: %w", err)
+			}
+			if retryableErr := httpretry.CheckResponseForRetryableError(resp.StatusCode); retryableErr != nil {
+				logger.Info("docling returned retryable status, will retry", "statusCode", resp.StatusCode)
+				_ = resp.Body.Close()
+				return retryableErr
+			}
+			return nil
+		})
 	}
 
-	logger.Info("sending request to docling service", "url", endpoint)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
+	if err := sendWithRetry("Bearer %s"); err != nil {
+		return nil, err
 	}
 
+	// Fall back to a different auth format if the initial attempt got 403.
 	if resp.StatusCode == http.StatusForbidden && c.ClientConfig.Key != "" {
-		req, err = c.createHTTPRequest(ctx, method, endpoint, payload, "%s")
-		if err != nil {
-			return nil, fmt.Errorf("failed to create request: %w", err)
-		}
-		resp, err = client.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("failed to send request: %w", err)
+		_ = resp.Body.Close()
+		if err := sendWithRetry("%s"); err != nil {
+			return nil, err
 		}
 	}
 
