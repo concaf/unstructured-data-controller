@@ -46,6 +46,11 @@ spec:
           spec:
             description: ControllerConfigSpec defines the desired state of ControllerConfig.
             properties:
+              cacheDirectory:
+                description: |-
+                  deprecated
+                  Deprecated: This field is no longer used and will be removed in a future release.
+                type: string
               dataStorageBucket:
                 description: data storage
                 type: string
@@ -163,9 +168,7 @@ spec:
                     type: integer
                 type: object
               unstructuredSecret:
-                description: |-
-                  deprecated
-                  Deprecated: use SecretRef instead.
+                description: 'Deprecated: use SecretRef instead.'
                 type: string
               vlmAPIURL:
                 description: vlm

@@ -25,7 +25,7 @@ import (
 //	spec:
 //	  secretRef: operator-secret             # k8s secret with filestore AWS creds, docling key, embedding credentials
 //	  dataStorageBucket: data-storage-bucket
-//	  cacheDirectory: /tmp/cache
+//	  dataStorageDirectory: /tmp/cache
 //	  doclingServeURL: http://docling-serve:5001
 //	  maxConcurrentDoclingTasks: 5
 //	  maxConcurrentLangchainTasks: 3
@@ -96,6 +96,9 @@ type ControllerConfigSpec struct {
 	UnstructuredDataPipelineResyncInterval *int `json:"unstructuredDataPipelineResyncInterval,omitempty"`
 
 	// deprecated
+	// Deprecated: This field is no longer used and will be removed in a future release.
+	// +optional
+	CacheDirectory string `json:"cacheDirectory,omitempty"`
 	// Deprecated: use SecretRef instead.
 	// +optional
 	UnstructuredSecret string `json:"unstructuredSecret,omitempty"`

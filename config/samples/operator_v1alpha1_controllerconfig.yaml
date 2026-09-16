@@ -9,7 +9,7 @@ spec:
   secretRef: operator-secret
   doclingServeURL: "http://docling-serve:5001"
   dataStorageBucket: "data-storage-bucket"
-  cacheDirectory: "tmp/cache/"
+  dataStorageDirectory: "tmp/cache/"
   maxConcurrentDoclingTasks: 5
   maxConcurrentLangchainTasks: 10
   # Optional: LDAP configuration for user/group identity resolution
