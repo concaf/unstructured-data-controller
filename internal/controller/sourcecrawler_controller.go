@@ -81,18 +81,6 @@ func (r *SourceCrawlerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	// Skip reconciliation if the spec hasn't changed since the last successful run.
-	// This avoids redundant work during pod restarts when the informer re-lists all CRs.
-	if controllerutils.IsAlreadyReconciled(
-		sourceCrawlerCR.Generation,
-		sourceCrawlerCR.Status.LastAppliedGeneration,
-		sourceCrawlerCR.Status.Conditions,
-		operatorv1alpha1.SourceCrawlerCondition,
-	) {
-		logger.V(1).Info("already reconciled for current generation, skipping")
-		return ctrl.Result{}, nil
-	}
-
 	if err := controllerutils.StatusPatch(ctx, r.Client, sourceCrawlerCR, func() {
 		sourceCrawlerCR.SetWaiting()
 	}); err != nil {
@@ -416,7 +404,10 @@ func (r *SourceCrawlerReconciler) findSecretDependents(ctx context.Context, obj 
 // changes to any dependency trigger a reconcile of the owning SourceCrawler.
 func (r *SourceCrawlerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&operatorv1alpha1.SourceCrawler{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&operatorv1alpha1.SourceCrawler{}, builder.WithPredicates(
+			predicate.GenerationChangedPredicate{},
+			controllerutils.SkipAlreadyReconciledCreate{ConditionType: operatorv1alpha1.SourceCrawlerCondition},
+		)).
 		Watches(&operatorv1alpha1.DocumentProcessor{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Watches(&operatorv1alpha1.VectorEmbeddingsGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
