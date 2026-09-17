@@ -76,18 +76,6 @@ func (r *DestinationSyncerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
-	// Skip reconciliation if the spec hasn't changed since the last successful run.
-	// This avoids redundant work during pod restarts when the informer re-lists all CRs.
-	if controllerutils.IsAlreadyReconciled(
-		destinationSyncCR.Generation,
-		destinationSyncCR.Status.LastAppliedGeneration,
-		destinationSyncCR.Status.Conditions,
-		operatorv1alpha1.DestinationSyncerCondition,
-	) {
-		logger.V(1).Info("already reconciled for current generation, skipping")
-		return ctrl.Result{}, nil
-	}
-
 	if err := controllerutils.StatusPatch(ctx, r.Client, destinationSyncCR, func() {
 		destinationSyncCR.SetWaiting()
 	}); err != nil {
@@ -216,7 +204,10 @@ func (r *DestinationSyncerReconciler) findSecretDependents(ctx context.Context, 
 // SetupWithManager sets up the controller with the Manager.
 func (r *DestinationSyncerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&operatorv1alpha1.DestinationSyncer{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&operatorv1alpha1.DestinationSyncer{}, builder.WithPredicates(
+			predicate.GenerationChangedPredicate{},
+			controllerutils.SkipAlreadyReconciledCreate{ConditionType: operatorv1alpha1.DestinationSyncerCondition},
+		)).
 		Watches(&operatorv1alpha1.SourceCrawler{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Watches(&operatorv1alpha1.DocumentProcessor{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
