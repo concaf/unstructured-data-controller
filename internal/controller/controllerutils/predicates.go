@@ -63,17 +63,17 @@ func IsAlreadyReconciled(generation, lastAppliedGeneration int64, conditions []m
 	return condition != nil && condition.Status == metav1.ConditionTrue
 }
 
-// NewReconcileNeededPredicate filters out Create events for objects that have
+// ReconcileNeededPredicate filters out Create events for objects that have
 // already been successfully reconciled. This prevents redundant reconciliation
 // during pod restarts when the informer re-lists all existing objects as Create
 // events. RequeueAfter items bypass predicates entirely, so controllers that
 // rely on periodic re-reconciliation (polling S3, checking task status) are
 // unaffected.
-type NewReconcileNeededPredicate struct {
+type ReconcileNeededPredicate struct {
 	ConditionType string
 }
 
-func (p NewReconcileNeededPredicate) Create(e event.CreateEvent) bool {
+func (p ReconcileNeededPredicate) Create(e event.CreateEvent) bool {
 	obj, ok := e.Object.(ReconcilableObject)
 	if !ok {
 		return true
@@ -87,10 +87,10 @@ func (p NewReconcileNeededPredicate) Create(e event.CreateEvent) bool {
 }
 
 //nolint:revive // receiver unused but required by the predicate.Predicate interface
-func (p NewReconcileNeededPredicate) Update(_ event.UpdateEvent) bool { return true }
+func (p ReconcileNeededPredicate) Update(_ event.UpdateEvent) bool { return true }
 
 //nolint:revive // receiver unused but required by the predicate.Predicate interface
-func (p NewReconcileNeededPredicate) Delete(_ event.DeleteEvent) bool { return true }
+func (p ReconcileNeededPredicate) Delete(_ event.DeleteEvent) bool { return true }
 
 //nolint:revive // receiver unused but required by the predicate.Predicate interface
-func (p NewReconcileNeededPredicate) Generic(_ event.GenericEvent) bool { return true }
+func (p ReconcileNeededPredicate) Generic(_ event.GenericEvent) bool { return true }
