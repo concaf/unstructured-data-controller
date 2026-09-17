@@ -17,17 +17,14 @@ limitations under the License.
 package main
 
 import (
-	"context"
 	"crypto/tls"
 	"flag"
 	"os"
 	"path/filepath"
-	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
-	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -36,7 +33,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -188,15 +184,12 @@ func main() {
 		})
 	}
 
-	// Read ControllerConfig before creating the manager to configure per-controller
-	// concurrency. Uses a direct client since the manager (and its cache) doesn't exist yet.
-	// This is the pattern used by Cluster API and cert-manager — concurrency is set at
-	// startup and changes take effect on the next pod restart.
-	restConfig := ctrl.GetConfigOrDie()
-	groupKindConcurrency := readReconcilerConcurrencyFromConfig(restConfig, watchNamespace)
+	// Configure per-controller concurrency from environment variables.
+	// Each controller defaults to 5 and can be overridden (e.g., CONCURRENCY_DOCUMENT_PROCESSOR=10).
+	groupKindConcurrency := controllerutils.BuildGroupKindConcurrency()
 	setupLog.Info("configured per-controller concurrency", "groupKindConcurrency", groupKindConcurrency)
 
-	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
@@ -316,33 +309,4 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
-}
-
-// readReconcilerConcurrencyFromConfig reads the ControllerConfig CR before the
-// manager starts and builds a GroupKindConcurrency map for per-controller
-// concurrency. Falls back to defaults if the CR doesn't exist yet (e.g., first deploy).
-func readReconcilerConcurrencyFromConfig(restConfig *rest.Config, namespace string) map[string]int {
-	directClient, err := client.New(restConfig, client.Options{Scheme: scheme})
-	if err != nil {
-		setupLog.Info("could not create direct client for concurrency config, using defaults", "error", err)
-		return controllerutils.BuildGroupKindConcurrency(nil)
-	}
-
-	// Use a bounded context so a hanging API server doesn't block startup.
-	listCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	controllerConfigList := &operatorv1alpha1.ControllerConfigList{}
-	if err := directClient.List(listCtx, controllerConfigList, client.InNamespace(namespace)); err != nil {
-		setupLog.Info("could not read ControllerConfig for concurrency settings, using defaults", "error", err)
-		return controllerutils.BuildGroupKindConcurrency(nil)
-	}
-
-	if len(controllerConfigList.Items) == 0 {
-		setupLog.Info("no ControllerConfig CR found, using default concurrency settings")
-		return controllerutils.BuildGroupKindConcurrency(nil)
-	}
-
-	controllerConfig := controllerConfigList.Items[0]
-	return controllerutils.BuildGroupKindConcurrency(controllerConfig.Spec.ReconcilerConcurrency)
 }
