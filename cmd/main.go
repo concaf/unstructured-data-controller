@@ -22,6 +22,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -327,8 +328,12 @@ func readReconcilerConcurrencyFromConfig(restConfig *rest.Config, namespace stri
 		return controllerutils.BuildGroupKindConcurrency(nil)
 	}
 
+	// Use a bounded context so a hanging API server doesn't block startup.
+	listCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	controllerConfigList := &operatorv1alpha1.ControllerConfigList{}
-	if err := directClient.List(context.Background(), controllerConfigList, client.InNamespace(namespace)); err != nil {
+	if err := directClient.List(listCtx, controllerConfigList, client.InNamespace(namespace)); err != nil {
 		setupLog.Info("could not read ControllerConfig for concurrency settings, using defaults", "error", err)
 		return controllerutils.BuildGroupKindConcurrency(nil)
 	}

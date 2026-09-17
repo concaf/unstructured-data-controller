@@ -17,6 +17,7 @@ limitations under the License.
 package httpretry
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -64,6 +65,23 @@ func IsRetryableHTTPError(err error) bool {
 	default:
 		return false
 	}
+}
+
+// RetryWithContext retries fn with capped exponential backoff, respecting
+// context cancellation. Unlike retry.OnError which uses time.Sleep,
+// ExponentialBackoffWithContext interrupts the backoff sleep when the context
+// is cancelled — preventing a controller worker from being blocked during shutdown.
+func RetryWithContext(ctx context.Context, backoff wait.Backoff, isRetryable func(error) bool, fn func() error) error {
+	return wait.ExponentialBackoffWithContext(ctx, backoff, func(_ context.Context) (bool, error) {
+		err := fn()
+		if err == nil {
+			return true, nil
+		}
+		if isRetryable(err) {
+			return false, nil
+		}
+		return false, err
+	})
 }
 
 // CheckResponseForRetryableError returns a RetryableHTTPError if the HTTP
