@@ -54,17 +54,17 @@ type ReconcilableObject interface {
 	GetStatusConditions() []metav1.Condition
 }
 
-// SkipAlreadyReconciledCreate is a predicate that filters out Create events
+// SkipCreateEventsIfReconciled is a predicate that filters out Create events
 // for objects that have already been successfully reconciled. This prevents
 // redundant reconciliation during pod restarts when the informer re-lists
 // all existing objects as Create events. RequeueAfter items bypass predicates
 // entirely, so controllers that rely on periodic re-reconciliation (polling
 // S3, checking task status) are unaffected.
-type SkipAlreadyReconciledCreate struct {
+type SkipCreateEventsIfReconciled struct {
 	ConditionType string
 }
 
-func (p SkipAlreadyReconciledCreate) Create(e event.CreateEvent) bool {
+func (p SkipCreateEventsIfReconciled) Create(e event.CreateEvent) bool {
 	obj, ok := e.Object.(ReconcilableObject)
 	if !ok {
 		return true
@@ -79,13 +79,13 @@ func (p SkipAlreadyReconciledCreate) Create(e event.CreateEvent) bool {
 }
 
 //nolint:revive // receiver unused but required by the predicate.Predicate interface
-func (s SkipAlreadyReconciledCreate) Update(_ event.UpdateEvent) bool { return true }
+func (s SkipCreateEventsIfReconciled) Update(_ event.UpdateEvent) bool { return true }
 
 //nolint:revive // receiver unused but required by the predicate.Predicate interface
-func (s SkipAlreadyReconciledCreate) Delete(_ event.DeleteEvent) bool { return true }
+func (s SkipCreateEventsIfReconciled) Delete(_ event.DeleteEvent) bool { return true }
 
 //nolint:revive // receiver unused but required by the predicate.Predicate interface
-func (s SkipAlreadyReconciledCreate) Generic(_ event.GenericEvent) bool { return true }
+func (s SkipCreateEventsIfReconciled) Generic(_ event.GenericEvent) bool { return true }
 
 // Environment variable names for per-controller concurrency overrides.
 const (
