@@ -406,7 +406,7 @@ func (r *SourceCrawlerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.SourceCrawler{}, builder.WithPredicates(
 			predicate.GenerationChangedPredicate{},
-			controllerutils.SkipAlreadyReconciledCreate{ConditionType: operatorv1alpha1.SourceCrawlerCondition},
+			controllerutils.SkipCreateEventsIfReconciled{ConditionType: operatorv1alpha1.SourceCrawlerCondition},
 		)).
 		Watches(&operatorv1alpha1.DocumentProcessor{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
