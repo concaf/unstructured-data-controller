@@ -19,11 +19,6 @@ package controllerutils
 import (
 	"os"
 	"strconv"
-
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
 const (
@@ -34,58 +29,6 @@ const (
 
 	apiGroup = "operator.dataverse.redhat.com"
 )
-
-// IsAlreadyReconciled returns true when the CR's spec has already been
-// successfully reconciled. This allows controllers to skip redundant work
-// during pod restarts when the informer re-lists all existing objects.
-func IsAlreadyReconciled(generation, lastAppliedGeneration int64, conditions []metav1.Condition, conditionType string) bool {
-	if lastAppliedGeneration != generation {
-		return false
-	}
-	condition := meta.FindStatusCondition(conditions, conditionType)
-	return condition != nil && condition.Status == metav1.ConditionTrue
-}
-
-// ReconcilableObject is implemented by CRs that track their reconciliation
-// state via LastAppliedGeneration and Conditions.
-type ReconcilableObject interface {
-	client.Object
-	GetLastAppliedGeneration() int64
-	GetStatusConditions() []metav1.Condition
-}
-
-// SkipCreateEventsIfReconciled is a predicate that filters out Create events
-// for objects that have already been successfully reconciled. This prevents
-// redundant reconciliation during pod restarts when the informer re-lists
-// all existing objects as Create events. RequeueAfter items bypass predicates
-// entirely, so controllers that rely on periodic re-reconciliation (polling
-// S3, checking task status) are unaffected.
-type SkipCreateEventsIfReconciled struct {
-	ConditionType string
-}
-
-func (p SkipCreateEventsIfReconciled) Create(e event.CreateEvent) bool {
-	obj, ok := e.Object.(ReconcilableObject)
-	if !ok {
-		return true
-	}
-	// Allow the event through if the object has NOT been reconciled yet.
-	return !IsAlreadyReconciled(
-		obj.GetGeneration(),
-		obj.GetLastAppliedGeneration(),
-		obj.GetStatusConditions(),
-		p.ConditionType,
-	)
-}
-
-//nolint:revive // receiver unused but required by the predicate.Predicate interface
-func (s SkipCreateEventsIfReconciled) Update(_ event.UpdateEvent) bool { return true }
-
-//nolint:revive // receiver unused but required by the predicate.Predicate interface
-func (s SkipCreateEventsIfReconciled) Delete(_ event.DeleteEvent) bool { return true }
-
-//nolint:revive // receiver unused but required by the predicate.Predicate interface
-func (s SkipCreateEventsIfReconciled) Generic(_ event.GenericEvent) bool { return true }
 
 // Environment variable names for per-controller concurrency overrides.
 const (

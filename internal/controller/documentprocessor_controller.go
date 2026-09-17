@@ -548,7 +548,7 @@ func (r *DocumentProcessorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.DocumentProcessor{}, builder.WithPredicates(
 			predicate.GenerationChangedPredicate{},
-			controllerutils.SkipCreateEventsIfReconciled{ConditionType: operatorv1alpha1.DocumentProcessorCondition},
+			controllerutils.NewReconcileNeededPredicate{ConditionType: operatorv1alpha1.DocumentProcessorCondition},
 		)).
 		Watches(&operatorv1alpha1.SourceCrawler{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
