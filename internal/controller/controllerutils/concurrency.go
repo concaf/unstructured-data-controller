@@ -17,13 +17,13 @@ limitations under the License.
 package controllerutils
 
 import (
+	"os"
+	"strconv"
+
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
-
-	operatorv1alpha1 "github.com/redhat-data-and-ai/unstructured-data-controller/api/v1alpha1"
 )
 
 const (
@@ -87,37 +87,37 @@ func (s SkipAlreadyReconciledCreate) Delete(_ event.DeleteEvent) bool { return t
 //nolint:revive // receiver unused but required by the predicate.Predicate interface
 func (s SkipAlreadyReconciledCreate) Generic(_ event.GenericEvent) bool { return true }
 
-// BuildGroupKindConcurrency builds a GroupKindConcurrency map from the
-// ControllerConfig's reconcilerConcurrency settings. The map keys use the
-// "Kind.group" format required by controller-runtime's config.Controller.
-func BuildGroupKindConcurrency(reconcilerConcurrency *operatorv1alpha1.ReconcilerConcurrency) map[string]int {
-	groupKindConcurrency := map[string]int{
-		"UnstructuredDataPipeline." + apiGroup:  DefaultReconcilerConcurrency,
-		"DocumentProcessor." + apiGroup:         DefaultReconcilerConcurrency,
-		"ChunksGenerator." + apiGroup:           DefaultReconcilerConcurrency,
-		"VectorEmbeddingsGenerator." + apiGroup: DefaultReconcilerConcurrency,
-		"SourceCrawler." + apiGroup:             DefaultReconcilerConcurrency,
-		"DestinationSyncer." + apiGroup:         DefaultReconcilerConcurrency,
-	}
+// Environment variable names for per-controller concurrency overrides.
+const (
+	EnvConcurrencyUnstructuredDataPipeline  = "CONCURRENCY_UNSTRUCTURED_DATA_PIPELINE"
+	EnvConcurrencyDocumentProcessor         = "CONCURRENCY_DOCUMENT_PROCESSOR"
+	EnvConcurrencyChunksGenerator           = "CONCURRENCY_CHUNKS_GENERATOR"
+	EnvConcurrencyVectorEmbeddingsGenerator = "CONCURRENCY_VECTOR_EMBEDDINGS_GENERATOR"
+	EnvConcurrencySourceCrawler             = "CONCURRENCY_SOURCE_CRAWLER"
+	EnvConcurrencyDestinationSyncer         = "CONCURRENCY_DESTINATION_SYNCER"
+)
 
-	if reconcilerConcurrency == nil {
-		return groupKindConcurrency
-	}
-
-	// Override defaults with user-specified values.
-	overrides := map[string]*int{
-		"UnstructuredDataPipeline." + apiGroup:  reconcilerConcurrency.UnstructuredDataPipeline,
-		"DocumentProcessor." + apiGroup:         reconcilerConcurrency.DocumentProcessor,
-		"ChunksGenerator." + apiGroup:           reconcilerConcurrency.ChunksGenerator,
-		"VectorEmbeddingsGenerator." + apiGroup: reconcilerConcurrency.VectorEmbeddingsGenerator,
-		"SourceCrawler." + apiGroup:             reconcilerConcurrency.SourceCrawler,
-		"DestinationSyncer." + apiGroup:         reconcilerConcurrency.DestinationSyncer,
-	}
-	for groupKind, concurrency := range overrides {
-		if concurrency != nil {
-			groupKindConcurrency[groupKind] = ptr.Deref(concurrency, DefaultReconcilerConcurrency)
+// concurrencyFromEnv reads a concurrency value from an environment variable,
+// falling back to DefaultReconcilerConcurrency if the variable is unset or invalid.
+func concurrencyFromEnv(envVar string) int {
+	if val := os.Getenv(envVar); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			return n
 		}
 	}
+	return DefaultReconcilerConcurrency
+}
 
-	return groupKindConcurrency
+// BuildGroupKindConcurrency builds a GroupKindConcurrency map for controller-runtime's
+// config.Controller. Each controller defaults to DefaultReconcilerConcurrency (5) and
+// can be overridden via environment variables (e.g., CONCURRENCY_DOCUMENT_PROCESSOR=10).
+func BuildGroupKindConcurrency() map[string]int {
+	return map[string]int{
+		"UnstructuredDataPipeline." + apiGroup:  concurrencyFromEnv(EnvConcurrencyUnstructuredDataPipeline),
+		"DocumentProcessor." + apiGroup:         concurrencyFromEnv(EnvConcurrencyDocumentProcessor),
+		"ChunksGenerator." + apiGroup:           concurrencyFromEnv(EnvConcurrencyChunksGenerator),
+		"VectorEmbeddingsGenerator." + apiGroup: concurrencyFromEnv(EnvConcurrencyVectorEmbeddingsGenerator),
+		"SourceCrawler." + apiGroup:             concurrencyFromEnv(EnvConcurrencySourceCrawler),
+		"DestinationSyncer." + apiGroup:         concurrencyFromEnv(EnvConcurrencyDestinationSyncer),
+	}
 }
