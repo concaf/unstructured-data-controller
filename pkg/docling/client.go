@@ -210,7 +210,9 @@ func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, 
 			if withRetry {
 				if retryableErr := httpretry.CheckResponseForRetryableError(resp.StatusCode); retryableErr != nil {
 					logger.Info("docling returned retryable status, will retry", "statusCode", resp.StatusCode)
-					_ = resp.Body.Close()
+					if closeErr := resp.Body.Close(); closeErr != nil {
+						logger.Error(closeErr, "failed to close response body before retry")
+					}
 					return retryableErr
 				}
 			}
@@ -228,7 +230,9 @@ func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, 
 
 	// Fall back to a different auth format if the initial attempt got 403.
 	if resp.StatusCode == http.StatusForbidden && c.ClientConfig.Key != "" {
-		_ = resp.Body.Close()
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Error(closeErr, "failed to close response body before auth fallback")
+		}
 		if err := sendRequest("%s"); err != nil {
 			return nil, err
 		}
