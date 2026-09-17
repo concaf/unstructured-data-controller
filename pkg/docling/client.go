@@ -184,47 +184,58 @@ func (c *Client) createHTTPRequest(ctx context.Context, method, endpoint string,
 	return req, nil
 }
 
-// doDoclingRequest sends an HTTP request to the docling service. When withRetry
-// is true, transient errors (429, 5xx) are retried with capped exponential backoff.
-// Use withRetry=false for task-creation POSTs where retrying could create duplicates,
-// and withRetry=true for idempotent read/poll operations.
-func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, payload []byte, withRetry bool) (
-	io.ReadCloser, error) {
+// sendHTTPRequest sends a single HTTP request to the docling service with the
+// given auth format. When withRetry is true, transient errors (429, 5xx) are
+// retried with capped exponential backoff.
+func (c *Client) sendHTTPRequest(
+	ctx context.Context, method, endpoint string, payload []byte, authFormat string, withRetry bool,
+) (*http.Response, error) {
 	logger := log.FromContext(ctx)
 	httpClient := &http.Client{
 		Timeout: c.ClientConfig.HTTPTimeout,
 	}
 
 	var resp *http.Response
-	sendRequest := func(authFormat string) error {
-		doOnce := func() error {
-			req, err := c.createHTTPRequest(ctx, method, endpoint, payload, authFormat)
-			if err != nil {
-				return fmt.Errorf("failed to create request: %w", err)
-			}
-			logger.Info("sending request to docling service", "url", endpoint)
-			resp, err = httpClient.Do(req)
-			if err != nil {
-				return fmt.Errorf("failed to send request: %w", err)
-			}
-			if withRetry {
-				if retryableErr := httpretry.CheckResponseForRetryableError(resp.StatusCode); retryableErr != nil {
-					logger.Info("docling returned retryable status, will retry", "statusCode", resp.StatusCode)
-					if closeErr := resp.Body.Close(); closeErr != nil {
-						logger.Error(closeErr, "failed to close response body before retry")
-					}
-					return retryableErr
+	doOnce := func() error {
+		req, err := c.createHTTPRequest(ctx, method, endpoint, payload, authFormat)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+		logger.Info("sending request to docling service", "url", endpoint)
+		resp, err = httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to send request: %w", err)
+		}
+		if withRetry {
+			if retryableErr := httpretry.CheckResponseForRetryableError(resp.StatusCode); retryableErr != nil {
+				logger.Info("docling returned retryable status, will retry", "statusCode", resp.StatusCode)
+				if closeErr := resp.Body.Close(); closeErr != nil {
+					logger.Error(closeErr, "failed to close response body before retry")
 				}
+				return retryableErr
 			}
-			return nil
 		}
-		if !withRetry {
-			return doOnce()
-		}
-		return httpretry.RetryWithContext(ctx, httpretry.ExternalServiceBackoff, httpretry.IsRetryableHTTPError, doOnce)
+		return nil
 	}
 
-	if err := sendRequest("Bearer %s"); err != nil {
+	var err error
+	if withRetry {
+		err = httpretry.RetryWithContext(ctx, httpretry.ExternalServiceBackoff, httpretry.IsRetryableHTTPError, doOnce)
+	} else {
+		err = doOnce()
+	}
+	return resp, err
+}
+
+// doDoclingRequest sends an HTTP request to the docling service, handling auth
+// format fallback. Use withRetry=false for task-creation POSTs where retrying
+// could create duplicates, and withRetry=true for idempotent read/poll operations.
+func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, payload []byte, withRetry bool) (
+	io.ReadCloser, error) {
+	logger := log.FromContext(ctx)
+
+	resp, err := c.sendHTTPRequest(ctx, method, endpoint, payload, "Bearer %s", withRetry)
+	if err != nil {
 		return nil, err
 	}
 
@@ -233,7 +244,8 @@ func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, 
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			logger.Error(closeErr, "failed to close response body before auth fallback")
 		}
-		if err := sendRequest("%s"); err != nil {
+		resp, err = c.sendHTTPRequest(ctx, method, endpoint, payload, "%s", withRetry)
+		if err != nil {
 			return nil, err
 		}
 	}
