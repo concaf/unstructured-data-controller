@@ -120,7 +120,9 @@ func (c *HTTPClient) GenerateEmbeddings(
 			return fmt.Errorf("failed to send embedding request: %w", reqErr)
 		}
 		body, reqErr = io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Error(closeErr, "failed to close embedding response body")
+		}
 		if reqErr != nil {
 			return fmt.Errorf("failed to read embedding response: %w", reqErr)
 		}
