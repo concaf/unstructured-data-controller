@@ -184,19 +184,10 @@ func (c *Client) createHTTPRequest(ctx context.Context, method, endpoint string,
 	return req, nil
 }
 
-func (c *Client) createDoclingRequest(ctx context.Context, method, endpoint string, payload []byte) (
-	io.ReadCloser, error) {
-	return c.doDoclingRequest(ctx, method, endpoint, payload, false)
-}
-
-// createDoclingRequestWithRetry sends a request with capped exponential backoff
-// for transient HTTP errors. Use this for idempotent read/poll operations only —
-// NOT for task-creation POSTs where retrying could create duplicate tasks.
-func (c *Client) createDoclingRequestWithRetry(ctx context.Context, method, endpoint string, payload []byte) (
-	io.ReadCloser, error) {
-	return c.doDoclingRequest(ctx, method, endpoint, payload, true)
-}
-
+// doDoclingRequest sends an HTTP request to the docling service. When withRetry
+// is true, transient errors (429, 5xx) are retried with capped exponential backoff.
+// Use withRetry=false for task-creation POSTs where retrying could create duplicates,
+// and withRetry=true for idempotent read/poll operations.
 func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, payload []byte, withRetry bool) (
 	io.ReadCloser, error) {
 	logger := log.FromContext(ctx)
@@ -299,7 +290,7 @@ func (c *Client) ConvertFile(
 		convertSourceAsyncEndpoint, "sourceFileURL", baseURL)
 	// convert response to AsyncDoclingResponse
 	var asyncResponse AsyncDoclingResponse
-	responseBody, err := c.createDoclingRequest(ctx, http.MethodPost, convertSourceAsyncEndpoint, payload)
+	responseBody, err := c.doDoclingRequest(ctx, http.MethodPost, convertSourceAsyncEndpoint, payload, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get response body: %w", err)
 	}
@@ -328,7 +319,7 @@ func (c *Client) getTaskStatus(ctx context.Context, taskID string) (bool, *TaskS
 
 	logger.Info("sending request to get status of task", "url", getTaskStatusPollEndpoint)
 	var taskStatusResponse TaskStatusResponse
-	bodyResponse, err := c.createDoclingRequestWithRetry(ctx, http.MethodGet, getTaskStatusPollEndpoint, nil)
+	bodyResponse, err := c.doDoclingRequest(ctx, http.MethodGet, getTaskStatusPollEndpoint, nil, true)
 	if err != nil {
 		return false, nil, fmt.Errorf("failed to get response body: %w", err)
 	}
@@ -381,7 +372,7 @@ func (c *Client) GetConvertedFile(ctx context.Context, taskID string) (TaskStatu
 
 	logger.Info("sending request to get converted file", "url", taskResultURL)
 	var doclingResponse DoclingResponse
-	bodyResponse, err := c.createDoclingRequestWithRetry(ctx, http.MethodGet, taskResultURL, nil)
+	bodyResponse, err := c.doDoclingRequest(ctx, http.MethodGet, taskResultURL, nil, true)
 	if err != nil {
 		c.safeRelease()
 		return "", nil, fmt.Errorf("failed to get response body: %w", err)
