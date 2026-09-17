@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/httpretry"
-	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -111,7 +110,7 @@ func (c *HTTPClient) GenerateEmbeddings(
 	// (429, 5xx). Non-retryable errors (400, 401, 404) fail immediately.
 	var resp *http.Response
 	var body []byte
-	err = retry.OnError(httpretry.ExternalServiceBackoff, httpretry.IsRetryableHTTPError, func() error {
+	err = httpretry.RetryWithContext(ctx, httpretry.ExternalServiceBackoff, httpretry.IsRetryableHTTPError, func() error {
 		req, reqErr := c.createHTTPRequest(ctx, http.MethodPost, c.Config.Endpoint, payload)
 		if reqErr != nil {
 			return reqErr

@@ -29,7 +29,6 @@ import (
 
 	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/httpretry"
 	"golang.org/x/sync/semaphore"
-	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -187,17 +186,27 @@ func (c *Client) createHTTPRequest(ctx context.Context, method, endpoint string,
 
 func (c *Client) createDoclingRequest(ctx context.Context, method, endpoint string, payload []byte) (
 	io.ReadCloser, error) {
+	return c.doDoclingRequest(ctx, method, endpoint, payload, false)
+}
+
+// createDoclingRequestWithRetry sends a request with capped exponential backoff
+// for transient HTTP errors. Use this for idempotent read/poll operations only —
+// NOT for task-creation POSTs where retrying could create duplicate tasks.
+func (c *Client) createDoclingRequestWithRetry(ctx context.Context, method, endpoint string, payload []byte) (
+	io.ReadCloser, error) {
+	return c.doDoclingRequest(ctx, method, endpoint, payload, true)
+}
+
+func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, payload []byte, withRetry bool) (
+	io.ReadCloser, error) {
 	logger := log.FromContext(ctx)
 	httpClient := &http.Client{
 		Timeout: c.ClientConfig.HTTPTimeout,
 	}
 
-	// sendWithRetry wraps an HTTP request with capped exponential backoff.
-	// Retries on transient errors (429, 5xx); returns immediately on success or
-	// non-retryable errors (400, 401, 404, etc.).
 	var resp *http.Response
-	sendWithRetry := func(authFormat string) error {
-		return retry.OnError(httpretry.ExternalServiceBackoff, httpretry.IsRetryableHTTPError, func() error {
+	sendRequest := func(authFormat string) error {
+		doOnce := func() error {
 			req, err := c.createHTTPRequest(ctx, method, endpoint, payload, authFormat)
 			if err != nil {
 				return fmt.Errorf("failed to create request: %w", err)
@@ -207,23 +216,29 @@ func (c *Client) createDoclingRequest(ctx context.Context, method, endpoint stri
 			if err != nil {
 				return fmt.Errorf("failed to send request: %w", err)
 			}
-			if retryableErr := httpretry.CheckResponseForRetryableError(resp.StatusCode); retryableErr != nil {
-				logger.Info("docling returned retryable status, will retry", "statusCode", resp.StatusCode)
-				_ = resp.Body.Close()
-				return retryableErr
+			if withRetry {
+				if retryableErr := httpretry.CheckResponseForRetryableError(resp.StatusCode); retryableErr != nil {
+					logger.Info("docling returned retryable status, will retry", "statusCode", resp.StatusCode)
+					_ = resp.Body.Close()
+					return retryableErr
+				}
 			}
 			return nil
-		})
+		}
+		if !withRetry {
+			return doOnce()
+		}
+		return httpretry.RetryWithContext(ctx, httpretry.ExternalServiceBackoff, httpretry.IsRetryableHTTPError, doOnce)
 	}
 
-	if err := sendWithRetry("Bearer %s"); err != nil {
+	if err := sendRequest("Bearer %s"); err != nil {
 		return nil, err
 	}
 
 	// Fall back to a different auth format if the initial attempt got 403.
 	if resp.StatusCode == http.StatusForbidden && c.ClientConfig.Key != "" {
 		_ = resp.Body.Close()
-		if err := sendWithRetry("%s"); err != nil {
+		if err := sendRequest("%s"); err != nil {
 			return nil, err
 		}
 	}
@@ -313,7 +328,7 @@ func (c *Client) getTaskStatus(ctx context.Context, taskID string) (bool, *TaskS
 
 	logger.Info("sending request to get status of task", "url", getTaskStatusPollEndpoint)
 	var taskStatusResponse TaskStatusResponse
-	bodyResponse, err := c.createDoclingRequest(ctx, http.MethodGet, getTaskStatusPollEndpoint, nil)
+	bodyResponse, err := c.createDoclingRequestWithRetry(ctx, http.MethodGet, getTaskStatusPollEndpoint, nil)
 	if err != nil {
 		return false, nil, fmt.Errorf("failed to get response body: %w", err)
 	}
@@ -366,7 +381,7 @@ func (c *Client) GetConvertedFile(ctx context.Context, taskID string) (TaskStatu
 
 	logger.Info("sending request to get converted file", "url", taskResultURL)
 	var doclingResponse DoclingResponse
-	bodyResponse, err := c.createDoclingRequest(ctx, http.MethodGet, taskResultURL, nil)
+	bodyResponse, err := c.createDoclingRequestWithRetry(ctx, http.MethodGet, taskResultURL, nil)
 	if err != nil {
 		c.safeRelease()
 		return "", nil, fmt.Errorf("failed to get response body: %w", err)
