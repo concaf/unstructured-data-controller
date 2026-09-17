@@ -371,7 +371,7 @@ func (r *ChunksGeneratorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&operatorv1alpha1.ChunksGenerator{}, builder.WithPredicates(
 			predicate.GenerationChangedPredicate{},
-			controllerutils.SkipCreateEventsIfReconciled{ConditionType: operatorv1alpha1.ChunksGeneratorCondition},
+			controllerutils.NewReconcileNeededPredicate{ConditionType: operatorv1alpha1.ChunksGeneratorCondition},
 		)).
 		Watches(&operatorv1alpha1.SourceCrawler{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Watches(&operatorv1alpha1.DocumentProcessor{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
