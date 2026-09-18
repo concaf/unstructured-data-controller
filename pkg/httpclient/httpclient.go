@@ -74,13 +74,13 @@ func IsRetryableHTTPError(err error) bool {
 func RetryWithContext(ctx context.Context, backoff wait.Backoff, isRetryable func(error) bool, fn func() error) error {
 	return wait.ExponentialBackoffWithContext(ctx, backoff, func(_ context.Context) (bool, error) {
 		err := fn()
-		if err == nil {
-			return true, nil
+		if err != nil {
+			if isRetryable(err) {
+				return false, nil
+			}
+			return false, err
 		}
-		if isRetryable(err) {
-			return false, nil
-		}
-		return false, err
+		return true, nil
 	})
 }
 
