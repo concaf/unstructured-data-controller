@@ -29,8 +29,8 @@ import (
 
 // ExternalServiceBackoff defines capped exponential backoff for external HTTP
 // service calls (docling, embedding, etc.). Retries up to 7 times with
-// exponential growth, then fails so the reconcile requeue can take over.
-// Sequence: 1s, 2s, 4s, 8s, 16s, 32s, 64s (about 2 minutes total).
+// exponential growth (6 waits between attempts, ~63s total), then fails
+// so the reconcile requeue can take over.
 var ExternalServiceBackoff = wait.Backoff{
 	Duration: 1 * time.Second,
 	Factor:   2.0,
@@ -99,6 +99,15 @@ func NewRetryTransport(base http.RoundTripper) *RetryTransport {
 func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	var resp *http.Response
 	err := RetryWithContext(req.Context(), ExternalServiceBackoff, IsRetryableHTTPError, func() error {
+		// Reset the request body for retries so POST/PUT don't send empty bodies.
+		if req.GetBody != nil {
+			body, bodyErr := req.GetBody()
+			if bodyErr != nil {
+				return fmt.Errorf("failed to reset request body for retry: %w", bodyErr)
+			}
+			req.Body = body
+		}
+
 		var reqErr error
 		resp, reqErr = t.Base.RoundTrip(req)
 		if reqErr != nil {
@@ -109,11 +118,15 @@ func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 				logger := log.FromContext(req.Context())
 				logger.Error(closeErr, "failed to close response body before retry")
 			}
+			resp = nil
 			return retryableErr
 		}
 		return nil
 	})
-	return resp, err
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 // CheckResponseForRetryableError returns a RetryableHTTPError if the HTTP
