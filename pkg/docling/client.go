@@ -184,49 +184,31 @@ func (c *Client) createHTTPRequest(ctx context.Context, method, endpoint string,
 	return req, nil
 }
 
-// sendHTTPRequest sends a request to the docling service with capped exponential
-// backoff on transient errors (429, 5xx). This is the default behavior for all
-// docling HTTP calls.
-func (c *Client) sendHTTPRequest(
-	ctx context.Context, method, endpoint string, payload []byte, authFormat string,
-) (*http.Response, error) {
-	logger := log.FromContext(ctx)
-	httpClient := &http.Client{
-		Timeout: c.ClientConfig.HTTPTimeout,
+// newHTTPClientWithRetry creates an HTTP client with automatic retry on
+// transient errors (429, 5xx) via the RetryTransport.
+func (c *Client) newHTTPClientWithRetry() *http.Client {
+	return &http.Client{
+		Timeout:   c.ClientConfig.HTTPTimeout,
+		Transport: httpretry.NewRetryTransport(http.DefaultTransport),
 	}
-
-	var resp *http.Response
-	err := httpretry.RetryWithContext(ctx, httpretry.ExternalServiceBackoff, httpretry.IsRetryableHTTPError, func() error {
-		req, reqErr := c.createHTTPRequest(ctx, method, endpoint, payload, authFormat)
-		if reqErr != nil {
-			return fmt.Errorf("failed to create request: %w", reqErr)
-		}
-		logger.Info("sending request to docling service", "url", endpoint)
-		resp, reqErr = httpClient.Do(req)
-		if reqErr != nil {
-			return fmt.Errorf("failed to send request: %w", reqErr)
-		}
-		if retryableErr := httpretry.CheckResponseForRetryableError(resp.StatusCode); retryableErr != nil {
-			logger.Info("docling returned retryable status, will retry", "statusCode", resp.StatusCode)
-			if closeErr := resp.Body.Close(); closeErr != nil {
-				logger.Error(closeErr, "failed to close response body before retry")
-			}
-			return retryableErr
-		}
-		return nil
-	})
-	return resp, err
 }
 
-// doDoclingRequest sends an HTTP request to the docling service with retry and
-// auth format fallback.
+// doDoclingRequest sends an HTTP request to the docling service with retry
+// (via transport) and auth format fallback.
 func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, payload []byte) (
 	io.ReadCloser, error) {
 	logger := log.FromContext(ctx)
+	httpClient := c.newHTTPClientWithRetry()
 
-	resp, err := c.sendHTTPRequest(ctx, method, endpoint, payload, "Bearer %s")
+	req, err := c.createHTTPRequest(ctx, method, endpoint, payload, "Bearer %s")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	logger.Info("sending request to docling service", "url", endpoint)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 
 	// Fall back to a different auth format if the initial attempt got 403.
@@ -234,9 +216,13 @@ func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, 
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			logger.Error(closeErr, "failed to close response body before auth fallback")
 		}
-		resp, err = c.sendHTTPRequest(ctx, method, endpoint, payload, "%s")
+		req, err = c.createHTTPRequest(ctx, method, endpoint, payload, "%s")
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		resp, err = httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to send request: %w", err)
 		}
 	}
 
