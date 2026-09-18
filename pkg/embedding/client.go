@@ -60,7 +60,8 @@ type HTTPClient struct {
 func NewHTTPClient(config *HTTPClientConfig) *HTTPClient {
 	return &HTTPClient{
 		Client: &http.Client{
-			Timeout: HTTPClientTimeout,
+			Timeout:   HTTPClientTimeout,
+			Transport: httpretry.NewRetryTransport(http.DefaultTransport),
 		},
 		Config: config,
 	}
@@ -105,35 +106,25 @@ func (c *HTTPClient) GenerateEmbeddings(
 	}
 
 	logger.Info("sending embedding request")
+	req, err := c.createHTTPRequest(ctx, http.MethodPost, c.Config.Endpoint, payload)
+	if err != nil {
+		return nil, err
+	}
 
-	// Send the request with capped exponential backoff for transient HTTP errors
-	// (429, 5xx). Non-retryable errors (400, 401, 404) fail immediately.
-	var resp *http.Response
-	var body []byte
-	err = httpretry.RetryWithContext(ctx, httpretry.ExternalServiceBackoff, httpretry.IsRetryableHTTPError, func() error {
-		req, reqErr := c.createHTTPRequest(ctx, http.MethodPost, c.Config.Endpoint, payload)
-		if reqErr != nil {
-			return reqErr
-		}
-		resp, reqErr = c.Client.Do(req)
-		if reqErr != nil {
-			return fmt.Errorf("failed to send embedding request: %w", reqErr)
-		}
-		body, reqErr = io.ReadAll(resp.Body)
+	// Retry is handled transparently by the RetryTransport on the HTTP client.
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send embedding request: %w", err)
+	}
+	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			logger.Error(closeErr, "failed to close embedding response body")
 		}
-		if reqErr != nil {
-			return fmt.Errorf("failed to read embedding response: %w", reqErr)
-		}
-		if retryableErr := httpretry.CheckResponseForRetryableError(resp.StatusCode); retryableErr != nil {
-			logger.Info("embedding API returned retryable status, will retry", "statusCode", resp.StatusCode)
-			return retryableErr
-		}
-		return nil
-	})
+	}()
+
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read embedding response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
