@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/wait"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // ExternalServiceBackoff defines capped exponential backoff for external HTTP
@@ -105,7 +106,10 @@ func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return reqErr
 		}
 		if retryableErr := CheckResponseForRetryableError(resp.StatusCode); retryableErr != nil {
-			_ = resp.Body.Close()
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				logger := log.FromContext(req.Context())
+				logger.Error(closeErr, "failed to close response body before retry")
+			}
 			return retryableErr
 		}
 		return nil
