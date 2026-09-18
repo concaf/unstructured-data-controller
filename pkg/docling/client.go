@@ -27,7 +27,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/httpretry"
+	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/httpclient"
 	"golang.org/x/sync/semaphore"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -189,7 +189,7 @@ func (c *Client) createHTTPRequest(ctx context.Context, method, endpoint string,
 func (c *Client) newHTTPClientWithRetry() *http.Client {
 	return &http.Client{
 		Timeout:   c.ClientConfig.HTTPTimeout,
-		Transport: httpretry.NewRetryTransport(http.DefaultTransport),
+		Transport: httpclient.NewRetryTransport(http.DefaultTransport),
 	}
 }
 
