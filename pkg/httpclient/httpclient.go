@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"time"
 
@@ -29,15 +28,15 @@ import (
 )
 
 // ExternalServiceBackoff defines capped exponential backoff for external HTTP
-// service calls (docling, embedding, etc.). The backoff grows exponentially
-// from 1s up to the 2-minute cap, then retries at 2-minute intervals.
-// Sequence: 1s → 2s → 4s → 8s → 16s → 32s → 64s → 120s → 120s → ...
+// service calls (docling, embedding, etc.). Retries up to 7 times with
+// exponential growth, then fails so the reconcile requeue can take over.
+// Sequence: 1s, 2s, 4s, 8s, 16s, 32s, 64s (about 2 minutes total).
 var ExternalServiceBackoff = wait.Backoff{
 	Duration: 1 * time.Second,
 	Factor:   2.0,
 	Cap:      2 * time.Minute,
-	Steps:    math.MaxInt32, // grow until the cap, then hold at the cap
-	Jitter:   0.2,           // 20% jitter to avoid thundering herd
+	Steps:    7,   // max 7 retries, then fail
+	Jitter:   0.2, // 20% jitter to avoid thundering herd
 }
 
 // RetryableHTTPError represents a transient HTTP error that can be retried.
