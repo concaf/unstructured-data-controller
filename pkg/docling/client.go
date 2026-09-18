@@ -227,6 +227,9 @@ func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, 
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Error(closeErr, "failed to close response body for non-200 response")
+		}
 		logger.Error(errors.New("received non-200 OK response from endpoint"),
 			"docling request returned non-200 status",
 			"statusCode", resp.StatusCode,
@@ -280,18 +283,35 @@ func (c *Client) ConvertFile(
 
 	logger.Info("sending request to convert file", "urlToSendRequest",
 		convertSourceAsyncEndpoint, "sourceFileURL", baseURL)
-	// Task creation POST — no retry because retrying after a partial success
+	// Task creation POST: no retry because retrying after a partial success
 	// could create duplicate untracked tasks in docling.
 	var asyncResponse AsyncDoclingResponse
+	httpClient := &http.Client{Timeout: c.ClientConfig.HTTPTimeout}
+
 	req, err := c.createHTTPRequest(ctx, http.MethodPost, convertSourceAsyncEndpoint, payload, "Bearer %s")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	httpClient := &http.Client{Timeout: c.ClientConfig.HTTPTimeout}
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
+
+	// Fall back to a different auth format if Bearer token got 403.
+	if resp.StatusCode == http.StatusForbidden && c.ClientConfig.Key != "" {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Error(closeErr, "failed to close response body before auth fallback")
+		}
+		req, err = c.createHTTPRequest(ctx, http.MethodPost, convertSourceAsyncEndpoint, payload, "%s")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		resp, err = httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to send request: %w", err)
+		}
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			logger.Error(closeErr, "failed to close response body")
