@@ -184,11 +184,11 @@ func (c *Client) createHTTPRequest(ctx context.Context, method, endpoint string,
 	return req, nil
 }
 
-// sendHTTPRequest sends a single HTTP request to the docling service with the
-// given auth format. When withRetry is true, transient errors (429, 5xx) are
-// retried with capped exponential backoff.
+// sendHTTPRequest sends a request to the docling service with capped exponential
+// backoff on transient errors (429, 5xx). This is the default behavior for all
+// docling HTTP calls.
 func (c *Client) sendHTTPRequest(
-	ctx context.Context, method, endpoint string, payload []byte, authFormat string, withRetry bool,
+	ctx context.Context, method, endpoint string, payload []byte, authFormat string,
 ) (*http.Response, error) {
 	logger := log.FromContext(ctx)
 	httpClient := &http.Client{
@@ -196,45 +196,35 @@ func (c *Client) sendHTTPRequest(
 	}
 
 	var resp *http.Response
-	doOnce := func() error {
-		req, err := c.createHTTPRequest(ctx, method, endpoint, payload, authFormat)
-		if err != nil {
-			return fmt.Errorf("failed to create request: %w", err)
+	err := httpretry.RetryWithContext(ctx, httpretry.ExternalServiceBackoff, httpretry.IsRetryableHTTPError, func() error {
+		req, reqErr := c.createHTTPRequest(ctx, method, endpoint, payload, authFormat)
+		if reqErr != nil {
+			return fmt.Errorf("failed to create request: %w", reqErr)
 		}
 		logger.Info("sending request to docling service", "url", endpoint)
-		resp, err = httpClient.Do(req)
-		if err != nil {
-			return fmt.Errorf("failed to send request: %w", err)
+		resp, reqErr = httpClient.Do(req)
+		if reqErr != nil {
+			return fmt.Errorf("failed to send request: %w", reqErr)
 		}
-		if withRetry {
-			if retryableErr := httpretry.CheckResponseForRetryableError(resp.StatusCode); retryableErr != nil {
-				logger.Info("docling returned retryable status, will retry", "statusCode", resp.StatusCode)
-				if closeErr := resp.Body.Close(); closeErr != nil {
-					logger.Error(closeErr, "failed to close response body before retry")
-				}
-				return retryableErr
+		if retryableErr := httpretry.CheckResponseForRetryableError(resp.StatusCode); retryableErr != nil {
+			logger.Info("docling returned retryable status, will retry", "statusCode", resp.StatusCode)
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				logger.Error(closeErr, "failed to close response body before retry")
 			}
+			return retryableErr
 		}
 		return nil
-	}
-
-	var err error
-	if withRetry {
-		err = httpretry.RetryWithContext(ctx, httpretry.ExternalServiceBackoff, httpretry.IsRetryableHTTPError, doOnce)
-	} else {
-		err = doOnce()
-	}
+	})
 	return resp, err
 }
 
-// doDoclingRequest sends an HTTP request to the docling service, handling auth
-// format fallback. Use withRetry=false for task-creation POSTs where retrying
-// could create duplicates, and withRetry=true for idempotent read/poll operations.
-func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, payload []byte, withRetry bool) (
+// doDoclingRequest sends an HTTP request to the docling service with retry and
+// auth format fallback.
+func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, payload []byte) (
 	io.ReadCloser, error) {
 	logger := log.FromContext(ctx)
 
-	resp, err := c.sendHTTPRequest(ctx, method, endpoint, payload, "Bearer %s", withRetry)
+	resp, err := c.sendHTTPRequest(ctx, method, endpoint, payload, "Bearer %s")
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +234,7 @@ func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, 
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			logger.Error(closeErr, "failed to close response body before auth fallback")
 		}
-		resp, err = c.sendHTTPRequest(ctx, method, endpoint, payload, "%s", withRetry)
+		resp, err = c.sendHTTPRequest(ctx, method, endpoint, payload, "%s")
 		if err != nil {
 			return nil, err
 		}
@@ -304,15 +294,31 @@ func (c *Client) ConvertFile(
 
 	logger.Info("sending request to convert file", "urlToSendRequest",
 		convertSourceAsyncEndpoint, "sourceFileURL", baseURL)
-	// convert response to AsyncDoclingResponse
+	// Task creation POST — no retry because retrying after a partial success
+	// could create duplicate untracked tasks in docling.
 	var asyncResponse AsyncDoclingResponse
-	responseBody, err := c.doDoclingRequest(ctx, http.MethodPost, convertSourceAsyncEndpoint, payload, false)
+	req, err := c.createHTTPRequest(ctx, http.MethodPost, convertSourceAsyncEndpoint, payload, "Bearer %s")
 	if err != nil {
-		return nil, fmt.Errorf("failed to get response body: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	defer func() { _ = responseBody.Close() }()
+	httpClient := &http.Client{Timeout: c.ClientConfig.HTTPTimeout}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Error(closeErr, "failed to close response body")
+		}
+		return nil, fmt.Errorf("failed to convert file: status code %d", resp.StatusCode)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Error(closeErr, "failed to close response body")
+		}
+	}()
 
-	body, err := io.ReadAll(responseBody)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
@@ -335,7 +341,7 @@ func (c *Client) getTaskStatus(ctx context.Context, taskID string) (bool, *TaskS
 
 	logger.Info("sending request to get status of task", "url", getTaskStatusPollEndpoint)
 	var taskStatusResponse TaskStatusResponse
-	bodyResponse, err := c.doDoclingRequest(ctx, http.MethodGet, getTaskStatusPollEndpoint, nil, true)
+	bodyResponse, err := c.doDoclingRequest(ctx, http.MethodGet, getTaskStatusPollEndpoint, nil)
 	if err != nil {
 		return false, nil, fmt.Errorf("failed to get response body: %w", err)
 	}
@@ -388,7 +394,7 @@ func (c *Client) GetConvertedFile(ctx context.Context, taskID string) (TaskStatu
 
 	logger.Info("sending request to get converted file", "url", taskResultURL)
 	var doclingResponse DoclingResponse
-	bodyResponse, err := c.doDoclingRequest(ctx, http.MethodGet, taskResultURL, nil, true)
+	bodyResponse, err := c.doDoclingRequest(ctx, http.MethodGet, taskResultURL, nil)
 	if err != nil {
 		c.safeRelease()
 		return "", nil, fmt.Errorf("failed to get response body: %w", err)
