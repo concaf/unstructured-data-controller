@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/httpretry"
+	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/httpclient"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -61,7 +61,7 @@ func NewHTTPClient(config *HTTPClientConfig) *HTTPClient {
 	return &HTTPClient{
 		Client: &http.Client{
 			Timeout:   HTTPClientTimeout,
-			Transport: httpretry.NewRetryTransport(http.DefaultTransport),
+			Transport: httpclient.NewRetryTransport(http.DefaultTransport),
 		},
 		Config: config,
 	}
