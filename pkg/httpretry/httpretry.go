@@ -84,6 +84,35 @@ func RetryWithContext(ctx context.Context, backoff wait.Backoff, isRetryable fun
 	})
 }
 
+// RetryTransport wraps an http.RoundTripper with automatic retry on transient
+// HTTP errors (429, 5xx) using capped exponential backoff. Use it as the
+// Transport on any http.Client to get retry behavior transparently.
+type RetryTransport struct {
+	Base http.RoundTripper
+}
+
+// NewRetryTransport creates a RetryTransport wrapping the given base transport.
+func NewRetryTransport(base http.RoundTripper) *RetryTransport {
+	return &RetryTransport{Base: base}
+}
+
+func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	var resp *http.Response
+	err := RetryWithContext(req.Context(), ExternalServiceBackoff, IsRetryableHTTPError, func() error {
+		var reqErr error
+		resp, reqErr = t.Base.RoundTrip(req)
+		if reqErr != nil {
+			return reqErr
+		}
+		if retryableErr := CheckResponseForRetryableError(resp.StatusCode); retryableErr != nil {
+			_ = resp.Body.Close()
+			return retryableErr
+		}
+		return nil
+	})
+	return resp, err
+}
+
 // CheckResponseForRetryableError returns a RetryableHTTPError if the HTTP
 // status code indicates a transient failure, or nil if the response is OK
 // or a non-retryable error.
