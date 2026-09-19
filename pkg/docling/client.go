@@ -213,6 +213,9 @@ func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, 
 
 	// Fall back to a different auth format if the initial attempt got 403.
 	if resp.StatusCode == http.StatusForbidden && c.ClientConfig.Key != "" {
+		if _, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024)); drainErr != nil {
+			logger.Error(drainErr, "failed to drain response body before auth fallback")
+		}
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			logger.Error(closeErr, "failed to close response body before auth fallback")
 		}
@@ -302,6 +305,9 @@ func (c *Client) ConvertFile(
 
 	// Fall back to a different auth format if Bearer token got 403.
 	if resp.StatusCode == http.StatusForbidden && c.ClientConfig.Key != "" {
+		if _, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024)); drainErr != nil {
+			logger.Error(drainErr, "failed to drain response body before auth fallback")
+		}
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			logger.Error(closeErr, "failed to close response body before auth fallback")
 		}
@@ -316,6 +322,9 @@ func (c *Client) ConvertFile(
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		if _, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024)); drainErr != nil {
+			logger.Error(drainErr, "failed to drain response body")
+		}
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			logger.Error(closeErr, "failed to close response body")
 		}
