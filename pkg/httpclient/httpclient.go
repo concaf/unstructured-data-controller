@@ -124,9 +124,11 @@ func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		if retryableErr := CheckResponseForRetryableError(resp.StatusCode); retryableErr != nil {
 			// Drain up to 64KB before closing so the HTTP/1.x transport can
 			// reuse the connection instead of opening a new one.
-			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+			logger := log.FromContext(req.Context())
+			if _, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024)); drainErr != nil {
+				logger.Error(drainErr, "failed to drain response body before retry")
+			}
 			if closeErr := resp.Body.Close(); closeErr != nil {
-				logger := log.FromContext(req.Context())
 				logger.Error(closeErr, "failed to close response body before retry")
 			}
 			resp = nil
