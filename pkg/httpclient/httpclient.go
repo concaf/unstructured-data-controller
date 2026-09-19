@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -97,6 +98,13 @@ func NewRetryTransport(base http.RoundTripper) *RetryTransport {
 }
 
 func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Reject requests with non-replayable bodies upfront. If req.Body is set
+	// but GetBody is nil, we cannot reset the body for retries, which would
+	// cause POST/PUT retries to send empty payloads silently.
+	if req.Body != nil && req.GetBody == nil {
+		return nil, errors.New("RetryTransport requires a replayable body (GetBody must be set)")
+	}
+
 	var resp *http.Response
 	err := RetryWithContext(req.Context(), ExternalServiceBackoff, IsRetryableHTTPError, func() error {
 		// Reset the request body for retries so POST/PUT don't send empty bodies.
@@ -114,6 +122,9 @@ func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			return reqErr
 		}
 		if retryableErr := CheckResponseForRetryableError(resp.StatusCode); retryableErr != nil {
+			// Drain up to 64KB before closing so the HTTP/1.x transport can
+			// reuse the connection instead of opening a new one.
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
 			if closeErr := resp.Body.Close(); closeErr != nil {
 				logger := log.FromContext(req.Context())
 				logger.Error(closeErr, "failed to close response body before retry")
