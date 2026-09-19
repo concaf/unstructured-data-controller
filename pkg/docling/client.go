@@ -227,6 +227,7 @@ func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, 
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			logger.Error(closeErr, "failed to close response body for non-200 response")
 		}
