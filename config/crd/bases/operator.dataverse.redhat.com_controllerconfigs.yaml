@@ -173,6 +173,8 @@ spec:
               vlmAPIURL:
                 description: vlm
                 type: string
+              vlmModelID:
+                type: string
             type: object
           status:
             description: ControllerConfigStatus defines the observed state of ControllerConfig.

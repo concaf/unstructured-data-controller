@@ -64,6 +64,7 @@ var (
 	embeddingModelCredentials              = map[Model]ModelCredentials{}
 	vlmAPIKey                              string
 	vlmAPIURL                              string
+	vlmModelID                             string
 	UnstructuredDataPipelineResyncInterval *int
 	LDAPClient                             ldap.Client
 	CacheClient                            pkgcache.Cache
@@ -153,6 +154,7 @@ func (r *ControllerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// VLM credentials for picture description
 	vlmAPIKey = string(secret.Data["VLM_API_KEY"])
 	vlmAPIURL = config.Spec.VLMAPIURL
+	vlmModelID = config.Spec.VLMModelID
 
 	// initialize LDAP client and cache if configured
 	if config.Spec.LDAPConfig != nil && config.Spec.LDAPConfig.Server != "" {

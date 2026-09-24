@@ -86,10 +86,13 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	documentProcessorCR = documentProcessorCR.DeepCopy()
 	documentProcessorCR.Spec.DocumentProcessorConfig.SetDefaults()
 
-	// Inject VLM URL from secret into the CRD config so it propagates to stored metadata and wire config.
+	// Inject VLM URL and model ID from ControllerConfig into the CRD config so it propagates to stored metadata and wire config.
 	if vlmAPIURL != "" && documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI != nil &&
 		documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI.URL == "" {
 		documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI.URL = strings.TrimSpace(vlmAPIURL)
+	}
+	if vlmModelID != "" && documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI != nil {
+		documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI.Params.Model = strings.TrimSpace(vlmModelID)
 	}
 
 	if documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.DoPictureDescription != nil &&

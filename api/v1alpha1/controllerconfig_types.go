@@ -74,6 +74,8 @@ type ControllerConfigSpec struct {
 	// vlm
 	// +optional
 	VLMAPIURL string `json:"vlmAPIURL,omitempty"`
+	// +optional
+	VLMModelID string `json:"vlmModelID,omitempty"`
 
 	// nomic
 	// +optional
