@@ -86,6 +86,18 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	documentProcessorCR = documentProcessorCR.DeepCopy()
 	documentProcessorCR.Spec.DocumentProcessorConfig.SetDefaults()
 
+	// Enable picture description automatically when VLM is configured on the ControllerConfig.
+	if vlmAPIURL != "" && vlmModelID != "" {
+		cfg := &documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig
+		if cfg.DoPictureDescription == nil || !*cfg.DoPictureDescription {
+			enabled := true
+			cfg.DoPictureDescription = &enabled
+		}
+		if cfg.PictureDescriptionAPI == nil {
+			cfg.PictureDescriptionAPI = &operatorv1alpha1.PictureDescriptionAPI{}
+		}
+	}
+
 	// Inject VLM URL and model ID from ControllerConfig into the CRD config so it propagates to stored metadata and wire config.
 	if pictureDescriptionAPI := documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI; pictureDescriptionAPI != nil {
 		if vlmAPIURL != "" && pictureDescriptionAPI.URL == "" {
@@ -93,19 +105,6 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 		if vlmModelID != "" && pictureDescriptionAPI.Params.Model == "" {
 			pictureDescriptionAPI.Params.Model = strings.TrimSpace(vlmModelID)
-		}
-	}
-
-	if documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.DoPictureDescription != nil &&
-		*documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.DoPictureDescription {
-		api := documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI
-		if api == nil || api.URL == "" {
-			return r.handleError(ctx, documentProcessorCR,
-				errors.New("VLM API URL is required for picture description but is not set in the DocumentProcessor CR or the ControllerConfig"))
-		}
-		if api.Params.Model == "" {
-			return r.handleError(ctx, documentProcessorCR,
-				errors.New("VLM model ID is required for picture description but is not set in the DocumentProcessor CR or the ControllerConfig vlmModelID field"))
 		}
 	}
 
