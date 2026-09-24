@@ -85,22 +85,11 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 	documentProcessorCR = documentProcessorCR.DeepCopy()
 
-	// Enable picture description before SetDefaults so that sub-defaults (MaxTokens, Prompt, Timeout, Concurrency) are populated.
-	if vlmAPIURL != "" && vlmModelID != "" && documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.DoPictureDescription == nil {
-		enabled := true
-		documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.DoPictureDescription = &enabled
-	}
-
+	applyVLMDefaults(documentProcessorCR)
 	documentProcessorCR.Spec.DocumentProcessorConfig.SetDefaults()
 
-	// Inject VLM URL and model ID from ControllerConfig into the CRD config so it propagates to stored metadata and wire config.
-	if pictureDescriptionAPI := documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI; pictureDescriptionAPI != nil {
-		if vlmAPIURL != "" && pictureDescriptionAPI.URL == "" {
-			pictureDescriptionAPI.URL = strings.TrimSpace(vlmAPIURL)
-		}
-		if vlmModelID != "" && pictureDescriptionAPI.Params.Model == "" {
-			pictureDescriptionAPI.Params.Model = strings.TrimSpace(vlmModelID)
-		}
+	if err := injectAndValidateVLMConfig(documentProcessorCR); err != nil {
+		return r.handleError(ctx, documentProcessorCR, err)
 	}
 
 	// set status to waiting
@@ -145,7 +134,7 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		if doclingCfg.PictureDescriptionAPI.Headers == nil {
 			doclingCfg.PictureDescriptionAPI.Headers = map[string]string{}
 		}
-		doclingCfg.PictureDescriptionAPI.Headers["Authorization"] = "Bearer " + strings.TrimSpace(vlmAPIKey)
+		doclingCfg.PictureDescriptionAPI.Headers["Authorization"] = "Bearer " + vlmAPIKey
 	}
 
 	fs, err := filestore.New(ctx, dataStorageDirectory, dataStorageBucket)
@@ -579,6 +568,36 @@ func copyHeaders(h map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+func applyVLMDefaults(cr *operatorv1alpha1.DocumentProcessor) {
+	if vlmAPIURL != "" && vlmModelID != "" && cr.Spec.DocumentProcessorConfig.DoclingConfig.DoPictureDescription == nil {
+		enabled := true
+		cr.Spec.DocumentProcessorConfig.DoclingConfig.DoPictureDescription = &enabled
+	}
+}
+
+func injectAndValidateVLMConfig(cr *operatorv1alpha1.DocumentProcessor) error {
+	if pictureDescriptionAPI := cr.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI; pictureDescriptionAPI != nil {
+		if vlmAPIURL != "" && pictureDescriptionAPI.URL == "" {
+			pictureDescriptionAPI.URL = vlmAPIURL
+		}
+		if vlmModelID != "" && pictureDescriptionAPI.Params.Model == "" {
+			pictureDescriptionAPI.Params.Model = vlmModelID
+		}
+	}
+
+	if cr.Spec.DocumentProcessorConfig.DoclingConfig.DoPictureDescription != nil &&
+		*cr.Spec.DocumentProcessorConfig.DoclingConfig.DoPictureDescription {
+		api := cr.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI
+		if api == nil || api.URL == "" {
+			return errors.New("VLM API URL is required for picture description but is not set in the DocumentProcessor CR or the ControllerConfig")
+		}
+		if api.Params.Model == "" {
+			return errors.New("VLM model ID is required for picture description but is not set in the DocumentProcessor CR or the ControllerConfig vlmModelID field")
+		}
+	}
+	return nil
 }
 
 func convertPictureDescriptionAPI(api *operatorv1alpha1.PictureDescriptionAPI) *docling.PictureDescriptionAPI {

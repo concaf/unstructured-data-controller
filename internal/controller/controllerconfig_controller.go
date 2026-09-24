@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -152,9 +153,9 @@ func (r *ControllerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	// VLM credentials for picture description
-	vlmAPIKey = string(secret.Data["VLM_API_KEY"])
-	vlmAPIURL = config.Spec.VLMAPIURL
-	vlmModelID = config.Spec.VLMModelID
+	vlmAPIKey = strings.TrimSpace(string(secret.Data["VLM_API_KEY"]))
+	vlmAPIURL = strings.TrimSpace(config.Spec.VLMAPIURL)
+	vlmModelID = strings.TrimSpace(config.Spec.VLMModelID)
 
 	// initialize LDAP client and cache if configured
 	if config.Spec.LDAPConfig != nil && config.Spec.LDAPConfig.Server != "" {
