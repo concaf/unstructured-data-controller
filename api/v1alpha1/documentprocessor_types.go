@@ -348,7 +348,7 @@ func (c *DoclingConfig) SetDefaults() {
 		c.ImagesScale = DefaultImagesScale
 	}
 	if c.DoPictureDescription == nil {
-		c.DoPictureDescription = boolPtr(true)
+		c.DoPictureDescription = boolPtr(false)
 	}
 	if c.DoPictureClassification == nil {
 		c.DoPictureClassification = boolPtr(true)
