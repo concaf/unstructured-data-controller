@@ -87,20 +87,26 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	documentProcessorCR.Spec.DocumentProcessorConfig.SetDefaults()
 
 	// Inject VLM URL and model ID from ControllerConfig into the CRD config so it propagates to stored metadata and wire config.
-	if vlmAPIURL != "" && documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI != nil &&
-		documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI.URL == "" {
-		documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI.URL = strings.TrimSpace(vlmAPIURL)
-	}
-	if vlmModelID != "" && documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI != nil {
-		documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI.Params.Model = strings.TrimSpace(vlmModelID)
+	if pictureDescriptionAPI := documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI; pictureDescriptionAPI != nil {
+		if vlmAPIURL != "" && pictureDescriptionAPI.URL == "" {
+			pictureDescriptionAPI.URL = strings.TrimSpace(vlmAPIURL)
+		}
+		if vlmModelID != "" && pictureDescriptionAPI.Params.Model == "" {
+			pictureDescriptionAPI.Params.Model = strings.TrimSpace(vlmModelID)
+		}
 	}
 
 	if documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.DoPictureDescription != nil &&
-		*documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.DoPictureDescription &&
-		(documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI == nil ||
-			documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI.URL == "") {
-		return r.handleError(ctx, documentProcessorCR,
-			errors.New("VLM API URL is required for picture description but is not set in the DocumentProcessor CR or the VLM API URL secret"))
+		*documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.DoPictureDescription {
+		api := documentProcessorCR.Spec.DocumentProcessorConfig.DoclingConfig.PictureDescriptionAPI
+		if api == nil || api.URL == "" {
+			return r.handleError(ctx, documentProcessorCR,
+				errors.New("VLM API URL is required for picture description but is not set in the DocumentProcessor CR or the ControllerConfig"))
+		}
+		if api.Params.Model == "" {
+			return r.handleError(ctx, documentProcessorCR,
+				errors.New("VLM model ID is required for picture description but is not set in the DocumentProcessor CR or the ControllerConfig vlmModelID field"))
+		}
 	}
 
 	// set status to waiting
