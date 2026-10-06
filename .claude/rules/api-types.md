@@ -11,5 +11,5 @@ globs: api/v1alpha1/**/*.go
 - Add `+kubebuilder:printcolumn` for Status and Message using the condition type
 - JSON tags must use camelCase
 - Optional fields must be pointer types with `+optional` marker
-- Do not edit `zz_generated.deepcopy.go` — run `make manifests generate`
+- Do not edit `zz_generated.deepcopy.go` - run `make manifests generate`
 - After any changes: run `make manifests generate`

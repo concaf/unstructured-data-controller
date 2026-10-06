@@ -6,15 +6,15 @@ tools: Read, Grep, Glob, Bash
 
 Review the current changes (use `git diff` and `git diff --cached`).
 
-Do not blindly accept patterns just because they exist in the codebase. If existing code contradicts Go or controller-runtime best practices, flag it. The existing `handleError` pattern double-logs (logs + returns) — do not let new code copy this.
+Do not blindly accept patterns just because they exist in the codebase. If existing code contradicts Go or controller-runtime best practices, flag it. The existing `handleError` pattern double-logs (logs + returns) - do not let new code copy this.
 
 This code will be reviewed by humans. Flag any non-obvious logic, conditional branches, fallbacks, retries, timeouts, or workarounds that lack a comment explaining the reasoning.
 
 Check for:
 
 ## Error Handling
-- Every error return is checked — no `_ = foo()` for error-returning functions
-- Always `if err != nil` — never use `if err == nil` as the primary branch
+- Every error return is checked - no `_ = foo()` for error-returning functions
+- Always `if err != nil` - never use `if err == nil` as the primary branch
 - Errors are wrapped with context: `fmt.Errorf("creating X for %s: %w", name, err)`
 - Errors are handled once: either logged OR returned, never both
 - `errors.Is`/`errors.As` used for matching, never string comparison
@@ -22,8 +22,8 @@ Check for:
 - No `Requeue: true` combined with a non-nil error return
 
 ## Naming
-- Variable names are descriptive — no single-letter vars outside loop indices and tiny-scope ctx/err
-- K8s objects named by kind: `crawlerDeployment`, `processorPod` — not `dep` or `p`
+- Variable names are descriptive - no single-letter vars outside loop indices and tiny-scope ctx/err
+- K8s objects named by kind: `crawlerDeployment`, `processorPod` - not `dep` or `p`
 - Acronyms all-caps: `ID`, `HTTP`, `URL`, `API`
 - Import aliases: `operatorv1alpha1`, `ctrl`, `appsv1`, `corev1`
 
@@ -31,12 +31,12 @@ Check for:
 - Controllers follow the established pattern in `internal/controller/sourcecrawler_controller.go`
 - `SetupWithManager` uses `GenerationChangedPredicate{}` on the primary resource
 - Reconcile flow: `log.FromContext(ctx)` → `IsConfigCRHealthy()` → `Get` CR → `SetWaiting()` → logic → `handleError`
-- Status updates use `controllerutils.StatusPatch` — re-fetches before mutating
+- Status updates use `controllerutils.StatusPatch` - re-fetches before mutating
 - RBAC markers use `namespace=unstructured-controller-namespace`
 
 ## Logging
-- `log.FromContext(ctx)` — no global loggers, no `fmt.Println`
-- Structured key-value pairs — no `fmt.Sprintf` in log messages
+- `log.FromContext(ctx)` - no global loggers, no `fmt.Println`
+- Structured key-value pairs - no `fmt.Sprintf` in log messages
 - Sufficient logging to debug from logs alone: reconcile entry, state transitions, decisions
 - `log.Error(err, ...)` for real errors, `log.Info(...)` for expected conditions
 
