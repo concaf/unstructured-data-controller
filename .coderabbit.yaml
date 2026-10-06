@@ -1,35 +1,45 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 
+# Review language
 language: en-US
 
+# Global tone for all review comments
 tone_instructions: >
   Be concise and direct. Focus on correctness, error handling, and Kubernetes operator patterns.
   Security is paramount - flag any security concerns, input validation gaps, or credential exposure.
   Challenge patterns that contradict best practices - do not accept code just because it matches existing patterns.
   Flag scope creep - PRs should do one thing. Skip style and formatting - golangci-lint handles that.
 
+# Opt into beta features as they become available
 early_access: true
 
 reviews:
+  # Balanced review - focuses on bugs/security/logic, skips style nitpicks
   profile: chill
+  # Comment only - do not block PRs with change requests
   request_changes_workflow: false
+  # Add a summary comment at the top of each PR
   high_level_summary: true
+  # No poem in the summary
   poem: false
+  # Collapse the file walkthrough to reduce PR comment noise
   collapse_walkthrough: true
+  # Do not generate sequence diagrams
   sequence_diagrams: false
+  # Show a table of changed files with descriptions
   changed_files_summary: true
 
+  # Skip reviewing generated, vendored, and binary files
   path_filters:
     - "!vendor/**"
     - "!**/*_generated*.go"
     - "!**/zz_generated.deepcopy.go"
     - "!go.sum"
     - "!config/crd/bases/**"
-    - "!**/*.png"
-    - "!**/*.jpg"
-    - "!**/*.svg"
 
+  # Per-path review instructions - CodeRabbit applies these when reviewing matching files
   path_instructions:
+    # CRD type definitions - check kubebuilder markers and type conventions
     - path: "api/v1alpha1/**/*.go"
       instructions: |
         Review for Kubernetes API type conventions:
@@ -42,6 +52,7 @@ reviews:
         - init() with SchemeBuilder.Register
         - Do NOT review zz_generated.deepcopy.go
 
+    # Controller reconcilers - check operator patterns and error handling
     - path: "internal/controller/**/*.go"
       instructions: |
         Review for controller-runtime and operator patterns.
@@ -64,6 +75,7 @@ reviews:
         - Name K8s objects by kind: crawlerDeployment, processorPod - not dep or p
         - Reconcilers must be idempotent and level-triggered (react to state, not events)
 
+    # MCP server tools - check error handling and input validation
     - path: "internal/mcp/**/*.go"
       instructions: |
         Review MCP server tool implementations for:
@@ -72,6 +84,7 @@ reviews:
         - Input validation on all user-facing parameters
         - Context propagation - use the ctx passed to the handler
 
+    # Shared library packages - check for idiomatic Go and clean interfaces
     - path: "pkg/**/*.go"
       instructions: |
         Review package code for idiomatic Go (reference: Effective Go, Google Go Style Guide):
@@ -82,6 +95,7 @@ reviews:
         - Descriptive variable names - no single-letter vars outside tiny scopes
         - Acronyms all-caps: ID, HTTP, URL, API - never Id, Http
 
+    # Test files - check conventions, coverage, and test quality
     - path: "test/**/*.go"
       instructions: |
         Review test code for:
@@ -92,6 +106,7 @@ reviews:
         - Assertions should check specific error messages/types, not just err != nil
         - Dot imports of ginkgo/v2 and gomega are allowed in this project
 
+    # Container images - check for security and layer efficiency
     - path: "Dockerfile*"
       instructions: |
         Review Dockerfiles for:
@@ -99,6 +114,7 @@ reviews:
         - No secrets or credentials in build args or COPY
         - Proper COPY ordering for layer caching (go.mod/go.sum before source)
 
+    # CI pipelines - check for security and minimal permissions
     - path: ".github/workflows/**"
       instructions: |
         Review GitHub Actions workflows for:
@@ -106,6 +122,7 @@ reviews:
         - Minimal permissions (contents: read where possible)
         - No secrets exposed in logs or echo statements
 
+    # Global Go rules - applied to every .go file in the repo
     - path: "**/*.go"
       instructions: |
         General Go review - apply to all Go files.
@@ -127,43 +144,60 @@ reviews:
         - Changes must have accompanying tests. Bug fixes need regression tests.
         - Do not comment on import ordering, line length, or formatting - golangci-lint handles that.
 
+  # Linting tools CodeRabbit runs on PRs
   tools:
+    # Go linter - uses project's .golangci.yml config
     golangci-lint:
       enabled: true
       config_file: .golangci.yml
+    # YAML linter - uses project's .yamllint config
     yamllint:
       enabled: true
       config_file: .yamllint
+    # Dockerfile linter
     hadolint:
       enabled: true
+    # GitHub Actions workflow linter
     actionlint:
       enabled: true
+    # Secret scanner - detects leaked credentials
     gitleaks:
       enabled: true
+    # Makefile linter
     checkmake:
       enabled: true
+    # Shell script linter
     shellcheck:
       enabled: true
 
+  # Auto-review settings - when CodeRabbit reviews PRs automatically
   auto_review:
+    # Enable automatic reviews on new PRs
     enabled: true
+    # Also review incremental pushes to open PRs
     auto_incremental_review: true
+    # Do not review draft PRs
     drafts: false
+    # Only review PRs targeting these branches
     base_branches:
       - main
       - "release-*"
+    # Skip reviewing PRs with these keywords in the title
     ignore_title_keywords:
       - wip
       - draft
       - do-not-merge
       - "\\[skip review\\]"
 
+# Enable chat replies to @coderabbitai mentions in PR comments
 chat:
   auto_reply: true
 
 knowledge_base:
+  # Learn from dismissed/accepted comments over time
   learnings:
     scope: auto
+  # Use project docs as review guidelines
   code_guidelines:
     enabled: true
     filePatterns:
