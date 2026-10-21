@@ -43,6 +43,12 @@ func (FilesProcessedChangedPredicate) Update(e event.UpdateEvent) bool {
 	return oldObj.GetFilesProcessed() != newObj.GetFilesProcessed()
 }
 
+// SkipReconcilePriority is used when requeueing a skipped reconcile (e.g.,
+// SourceCrawler restarting its poll timer). Setting a low priority ensures
+// that genuinely new or changed CRs are processed first. Borrowed from
+// data-platform-operator's ShouldSkipReconciliation pattern.
+var SkipReconcilePriority = -200
+
 // IsAlreadyReconciled returns true when the CR's spec has already been
 // successfully reconciled (generation matches and condition is healthy).
 // Use inside Reconcile() to skip expensive work on pod restart while still
