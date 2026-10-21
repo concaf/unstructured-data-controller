@@ -27,7 +27,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/hashicorp/go-retryablehttp"
+	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/httpclient"
 	"golang.org/x/sync/semaphore"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -111,7 +111,8 @@ type DoclingRequestPayload struct {
 }
 
 type Client struct {
-	ClientConfig *ClientConfig `json:"client_config"`
+	ClientConfig    *ClientConfig `json:"client_config"`
+	retryHTTPClient *http.Client  // reused across requests for connection pooling
 }
 
 type DoclingResponse struct {
@@ -145,7 +146,8 @@ type TaskStatusResponse struct {
 func NewClientFromURL(clientConfig *ClientConfig) *Client {
 	clientConfig.sem = semaphore.NewWeighted(clientConfig.MaxConcurrentRequests)
 	return &Client{
-		ClientConfig: clientConfig,
+		ClientConfig:    clientConfig,
+		retryHTTPClient: httpclient.NewWithRetry(clientConfig.HTTPTimeout),
 	}
 }
 
@@ -184,24 +186,14 @@ func (c *Client) createHTTPRequest(ctx context.Context, method, endpoint string,
 	return req, nil
 }
 
-// newHTTPClientWithRetry creates an HTTP client with automatic retry on
-// transient errors (429, 5xx) using hashicorp/go-retryablehttp.
-func (c *Client) newHTTPClientWithRetry() *http.Client {
-	retryClient := retryablehttp.NewClient()
-	retryClient.RetryMax = 7
-	retryClient.RetryWaitMin = 1 * time.Second
-	retryClient.RetryWaitMax = 2 * time.Minute
-	retryClient.Logger = nil
-	retryClient.HTTPClient.Timeout = c.ClientConfig.HTTPTimeout
-	return retryClient.StandardClient()
-}
-
-// doDoclingRequest sends an HTTP request to the docling service with retry
-// (via transport) and auth format fallback.
-func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, payload []byte) (
-	io.ReadCloser, error) {
+// sendWithAuthFallback sends an HTTP request using the given client, trying
+// "Bearer <key>" first. If the server returns 403 and we have a key configured,
+// it retries with the raw key format. This handles docling deployments that
+// expect different auth header formats.
+func (c *Client) sendWithAuthFallback(
+	ctx context.Context, httpClient *http.Client, method, endpoint string, payload []byte,
+) (*http.Response, error) {
 	logger := log.FromContext(ctx)
-	httpClient := c.newHTTPClientWithRetry()
 
 	req, err := c.createHTTPRequest(ctx, method, endpoint, payload, "Bearer %s")
 	if err != nil {
@@ -214,7 +206,7 @@ func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, 
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 
-	// Fall back to a different auth format if the initial attempt got 403.
+	// Fall back to raw key auth format if Bearer token got 403.
 	if resp.StatusCode == http.StatusForbidden && c.ClientConfig.Key != "" {
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			logger.Error(closeErr, "failed to close response body before auth fallback")
@@ -227,6 +219,21 @@ func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, 
 		if err != nil {
 			return nil, fmt.Errorf("failed to send request: %w", err)
 		}
+	}
+
+	return resp, nil
+}
+
+// doDoclingRequest sends an HTTP request to the docling service with retry
+// and auth format fallback. Uses the stored retry HTTP client for connection
+// reuse across calls.
+func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, payload []byte) (
+	io.ReadCloser, error) {
+	logger := log.FromContext(ctx)
+
+	resp, err := c.sendWithAuthFallback(ctx, c.retryHTTPClient, method, endpoint, payload)
+	if err != nil {
+		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -287,32 +294,14 @@ func (c *Client) ConvertFile(
 	logger.Info("sending request to convert file", "urlToSendRequest",
 		convertSourceAsyncEndpoint, "sourceFileURL", baseURL)
 	// Task creation POST: no retry because retrying after a partial success
-	// could create duplicate untracked tasks in docling.
+	// could create duplicate untracked tasks in docling. Use a plain HTTP
+	// client instead of the retry client.
 	var asyncResponse AsyncDoclingResponse
-	httpClient := &http.Client{Timeout: c.ClientConfig.HTTPTimeout}
+	plainHTTPClient := &http.Client{Timeout: c.ClientConfig.HTTPTimeout}
 
-	req, err := c.createHTTPRequest(ctx, http.MethodPost, convertSourceAsyncEndpoint, payload, "Bearer %s")
+	resp, err := c.sendWithAuthFallback(ctx, plainHTTPClient, http.MethodPost, convertSourceAsyncEndpoint, payload)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-
-	// Fall back to a different auth format if Bearer token got 403.
-	if resp.StatusCode == http.StatusForbidden && c.ClientConfig.Key != "" {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			logger.Error(closeErr, "failed to close response body before auth fallback")
-		}
-		req, err = c.createHTTPRequest(ctx, http.MethodPost, convertSourceAsyncEndpoint, payload, "%s")
-		if err != nil {
-			return nil, fmt.Errorf("failed to create request: %w", err)
-		}
-		resp, err = httpClient.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("failed to send request: %w", err)
-		}
+		return nil, fmt.Errorf("failed to send convert request: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {

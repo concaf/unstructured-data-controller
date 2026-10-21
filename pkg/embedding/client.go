@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/hashicorp/go-retryablehttp"
+	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/httpclient"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -58,14 +58,8 @@ type HTTPClient struct {
 }
 
 func NewHTTPClient(config *HTTPClientConfig) *HTTPClient {
-	retryClient := retryablehttp.NewClient()
-	retryClient.RetryMax = 7
-	retryClient.RetryWaitMin = 1 * time.Second
-	retryClient.RetryWaitMax = 2 * time.Minute
-	retryClient.Logger = nil
-	retryClient.HTTPClient.Timeout = HTTPClientTimeout
 	return &HTTPClient{
-		Client: retryClient.StandardClient(),
+		Client: httpclient.NewWithRetry(HTTPClientTimeout),
 		Config: config,
 	}
 }
@@ -114,7 +108,7 @@ func (c *HTTPClient) GenerateEmbeddings(
 		return nil, err
 	}
 
-	// Retry is handled transparently by the RetryTransport on the HTTP client.
+	// Retry is handled transparently by go-retryablehttp via the HTTP client.
 	resp, err := c.Client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send embedding request: %w", err)
