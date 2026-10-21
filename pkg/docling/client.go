@@ -27,7 +27,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/httpclient"
+	"github.com/hashicorp/go-retryablehttp"
 	"golang.org/x/sync/semaphore"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -185,12 +185,15 @@ func (c *Client) createHTTPRequest(ctx context.Context, method, endpoint string,
 }
 
 // newHTTPClientWithRetry creates an HTTP client with automatic retry on
-// transient errors (429, 5xx) via the RetryTransport.
+// transient errors (429, 5xx) using hashicorp/go-retryablehttp.
 func (c *Client) newHTTPClientWithRetry() *http.Client {
-	return &http.Client{
-		Timeout:   c.ClientConfig.HTTPTimeout,
-		Transport: httpclient.NewRetryTransport(http.DefaultTransport),
-	}
+	retryClient := retryablehttp.NewClient()
+	retryClient.RetryMax = 7
+	retryClient.RetryWaitMin = 1 * time.Second
+	retryClient.RetryWaitMax = 2 * time.Minute
+	retryClient.Logger = nil
+	retryClient.HTTPClient.Timeout = c.ClientConfig.HTTPTimeout
+	return retryClient.StandardClient()
 }
 
 // doDoclingRequest sends an HTTP request to the docling service with retry
@@ -213,9 +216,6 @@ func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, 
 
 	// Fall back to a different auth format if the initial attempt got 403.
 	if resp.StatusCode == http.StatusForbidden && c.ClientConfig.Key != "" {
-		if _, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024)); drainErr != nil {
-			logger.Error(drainErr, "failed to drain response body before auth fallback")
-		}
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			logger.Error(closeErr, "failed to close response body before auth fallback")
 		}
@@ -230,9 +230,6 @@ func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, 
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		if _, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024)); drainErr != nil {
-			logger.Error(drainErr, "failed to drain response body for non-200 response")
-		}
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			logger.Error(closeErr, "failed to close response body for non-200 response")
 		}
@@ -305,9 +302,6 @@ func (c *Client) ConvertFile(
 
 	// Fall back to a different auth format if Bearer token got 403.
 	if resp.StatusCode == http.StatusForbidden && c.ClientConfig.Key != "" {
-		if _, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024)); drainErr != nil {
-			logger.Error(drainErr, "failed to drain response body before auth fallback")
-		}
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			logger.Error(closeErr, "failed to close response body before auth fallback")
 		}
@@ -322,9 +316,6 @@ func (c *Client) ConvertFile(
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		if _, drainErr := io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024)); drainErr != nil {
-			logger.Error(drainErr, "failed to drain response body")
-		}
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			logger.Error(closeErr, "failed to close response body")
 		}

@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/httpclient"
+	"github.com/hashicorp/go-retryablehttp"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -58,11 +58,14 @@ type HTTPClient struct {
 }
 
 func NewHTTPClient(config *HTTPClientConfig) *HTTPClient {
+	retryClient := retryablehttp.NewClient()
+	retryClient.RetryMax = 7
+	retryClient.RetryWaitMin = 1 * time.Second
+	retryClient.RetryWaitMax = 2 * time.Minute
+	retryClient.Logger = nil
+	retryClient.HTTPClient.Timeout = HTTPClientTimeout
 	return &HTTPClient{
-		Client: &http.Client{
-			Timeout:   HTTPClientTimeout,
-			Transport: httpclient.NewRetryTransport(http.DefaultTransport),
-		},
+		Client: retryClient.StandardClient(),
 		Config: config,
 	}
 }
