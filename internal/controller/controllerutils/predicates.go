@@ -45,8 +45,7 @@ func (FilesProcessedChangedPredicate) Update(e event.UpdateEvent) bool {
 
 // SkipReconcilePriority is used when requeueing a skipped reconcile (e.g.,
 // SourceCrawler restarting its poll timer). Setting a low priority ensures
-// that genuinely new or changed CRs are processed first. Borrowed from
-// data-platform-operator's ShouldSkipReconciliation pattern.
+// that genuinely new or changed CRs are processed first.
 var SkipReconcilePriority = -200
 
 // IsAlreadyReconciled returns true when the CR's spec has already been
