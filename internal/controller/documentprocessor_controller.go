@@ -84,16 +84,17 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
-	// On pod restart, skip expensive work (docling calls) if the spec hasn't
-	// changed, but return RequeueAfter to restart the processing poll loop.
+	// On pod restart, skip expensive work (docling calls, S3 file checks) if
+	// the spec hasn't changed. No RequeueAfter needed because this controller
+	// is event-driven via FilesProcessedChangedPredicate from upstream stages.
 	if controllerutils.IsAlreadyReconciled(
 		documentProcessorCR.Generation,
 		documentProcessorCR.Status.LastAppliedGeneration,
 		documentProcessorCR.Status.Conditions,
 		operatorv1alpha1.DocumentProcessorCondition,
 	) {
-		logger.V(1).Info("spec unchanged, restarting poll timer")
-		return ctrl.Result{RequeueAfter: requeueAfter}, nil
+		logger.V(1).Info("spec unchanged, skipping reconciliation")
+		return ctrl.Result{}, nil
 	}
 
 	documentProcessorCR = documentProcessorCR.DeepCopy()

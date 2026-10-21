@@ -80,16 +80,17 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 		return ctrl.Result{}, err
 	}
 
-	// On pod restart, skip expensive work (embedding API calls) if the spec
-	// hasn't changed, but return RequeueAfter to restart the processing loop.
+	// On pod restart, skip expensive work (embedding API calls, S3 file checks)
+	// if the spec hasn't changed. No RequeueAfter needed because this controller
+	// is event-driven via FilesProcessedChangedPredicate from upstream stages.
 	if controllerutils.IsAlreadyReconciled(
 		vectorEmbeddingsGeneratorCR.Generation,
 		vectorEmbeddingsGeneratorCR.Status.LastAppliedGeneration,
 		vectorEmbeddingsGeneratorCR.Status.Conditions,
 		operatorv1alpha1.VectorEmbeddingGenerationConditionType,
 	) {
-		logger.V(1).Info("spec unchanged, restarting poll timer")
-		return ctrl.Result{RequeueAfter: requeueAfter}, nil
+		logger.V(1).Info("spec unchanged, skipping reconciliation")
+		return ctrl.Result{}, nil
 	}
 
 	vectorEmbeddingsGeneratorCR = vectorEmbeddingsGeneratorCR.DeepCopy()

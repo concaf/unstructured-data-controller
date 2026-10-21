@@ -89,16 +89,17 @@ func (r *ChunksGeneratorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
-	// On pod restart, skip expensive work (langchain calls) if the spec hasn't
-	// changed, but return RequeueAfter to restart the processing poll loop.
+	// On pod restart, skip expensive work (langchain calls, S3 file checks) if
+	// the spec hasn't changed. No RequeueAfter needed because this controller
+	// is event-driven via FilesProcessedChangedPredicate from upstream stages.
 	if controllerutils.IsAlreadyReconciled(
 		chunksGeneratorCR.Generation,
 		chunksGeneratorCR.Status.LastAppliedGeneration,
 		chunksGeneratorCR.Status.Conditions,
 		operatorv1alpha1.ChunksGeneratorCondition,
 	) {
-		logger.V(1).Info("spec unchanged, restarting poll timer")
-		return ctrl.Result{RequeueAfter: requeueAfter}, nil
+		logger.V(1).Info("spec unchanged, skipping reconciliation")
+		return ctrl.Result{}, nil
 	}
 
 	chunksGeneratorCR = chunksGeneratorCR.DeepCopy()
