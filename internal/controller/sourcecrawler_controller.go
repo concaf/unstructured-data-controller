@@ -98,10 +98,7 @@ func (r *SourceCrawlerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		operatorv1alpha1.SourceCrawlerCondition,
 	) {
 		logger.V(1).Info("spec unchanged, restarting poll timer")
-		return ctrl.Result{
-			RequeueAfter: defaultCrawlerResyncInterval,
-			Priority:     &controllerutils.SkipReconcilePriority,
-		}, nil
+		return ctrl.Result{RequeueAfter: defaultCrawlerResyncInterval}, nil
 	}
 
 	if err := controllerutils.StatusPatch(ctx, r.Client, sourceCrawlerCR, func() {
