@@ -54,6 +54,13 @@ Never use a predicate to filter out Create events based on reconciliation state.
 
 `GenerationChangedPredicate` is safe because it only filters Update events (its `Create()` returns true). Custom predicates that filter Create events based on status fields are not safe.
 
+### Priority queue behavior
+controller-runtime's priority queue automatically handles restart prioritization. Do NOT manually set `result.Priority` to lower the priority of requeued items - it's unnecessary because:
+- Restart re-list items are dequeued at priority -100 (set by the framework)
+- When a reconcile returns `RequeueAfter` without setting `result.Priority`, controller-runtime **preserves the original dequeue priority**
+- So restart items stay at -100 on requeue, and new CRs at priority 0 always jump ahead
+- Setting an explicit lower priority (e.g., -200) adds no value since -100 is already below 0
+
 ### Concurrency
 Per-controller concurrency is configured via environment variables (e.g., `CONCURRENCY_DOCUMENT_PROCESSOR=10`) with a default of 5 workers. This is set at startup via `config.Controller.GroupKindConcurrency` in the manager options. The work queue guarantees the same CR is never reconciled by two workers simultaneously, so increasing concurrency is safe for idempotent reconcilers.
 
