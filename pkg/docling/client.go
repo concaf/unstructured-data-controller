@@ -45,6 +45,11 @@ const (
 	SemaphorePanicError   = "semaphore: released more than held"
 )
 
+// ErrTaskNotFound is returned when docling has no record of a task ID.
+// This happens when docling restarts or evicts old tasks. The controller
+// should clear the stale task ID and re-submit the job.
+var ErrTaskNotFound = errors.New("docling task not found")
+
 type TaskStatus string
 
 type PictureDescriptionAPIParams struct {
@@ -239,6 +244,11 @@ func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, 
 	if resp.StatusCode != http.StatusOK {
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			logger.Error(closeErr, "failed to close response body for non-200 response")
+		}
+		// Return a specific error for 404 so callers can detect stale task IDs
+		// and re-submit instead of polling forever.
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, ErrTaskNotFound
 		}
 		logger.Error(errors.New("received non-200 OK response from endpoint"),
 			"docling request returned non-200 status",

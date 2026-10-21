@@ -170,15 +170,24 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	inputPath := unstructured.StagePath(pipelineName, documentProcessorCR.Spec.DependsOn[0].Name)
 	outputPath := unstructured.StagePath(pipelineName, documentProcessorCR.Spec.StageName)
 
-	// first, let's figure out the jobs that are currently running
+	// Check on in-flight docling jobs. If docling lost a task (404), remove
+	// it from the job list so the processDocument loop below can re-submit it.
 	jobProcessingErrors := []error{}
+	var activeJobs []operatorv1alpha1.Job
 	for _, job := range documentProcessorCR.Status.Jobs {
 		logger.Info("reconciling job", "job", job)
 		if err := r.reconcileJob(ctx, job, documentProcessorCR, inputPath, outputPath); err != nil {
+			if errors.Is(err, docling.ErrTaskNotFound) {
+				logger.Info("docling lost track of task, removing stale job so it can be re-submitted",
+					"taskID", job.TaskID, "filePath", job.FilePath)
+				continue
+			}
 			jobProcessingErrors = append(jobProcessingErrors, err)
 			logger.Error(err, "failed to process job", "job", job.FilePath)
 		}
+		activeJobs = append(activeJobs, job)
 	}
+	documentProcessorCR.Status.Jobs = activeJobs
 
 	filePaths, err := r.fileStore.ListFilesInPath(ctx, inputPath)
 	if err != nil {
