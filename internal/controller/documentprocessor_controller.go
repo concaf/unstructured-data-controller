@@ -84,6 +84,18 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
+	// On pod restart, skip expensive work (docling calls) if the spec hasn't
+	// changed, but return RequeueAfter to restart the processing poll loop.
+	if controllerutils.IsAlreadyReconciled(
+		documentProcessorCR.Generation,
+		documentProcessorCR.Status.LastAppliedGeneration,
+		documentProcessorCR.Status.Conditions,
+		operatorv1alpha1.DocumentProcessorCondition,
+	) {
+		logger.V(1).Info("spec unchanged, restarting poll timer")
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
+	}
+
 	documentProcessorCR = documentProcessorCR.DeepCopy()
 
 	applyVLMDefaults(documentProcessorCR)
@@ -538,10 +550,7 @@ func (r *DocumentProcessorReconciler) findDependents(ctx context.Context, obj cl
 // Watches on other stage types trigger reconcile when an upstream dependency's status changes.
 func (r *DocumentProcessorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&operatorv1alpha1.DocumentProcessor{}, builder.WithPredicates(
-			predicate.GenerationChangedPredicate{},
-			controllerutils.ReconcileNeededPredicate{ConditionType: operatorv1alpha1.DocumentProcessorCondition},
-		)).
+		For(&operatorv1alpha1.DocumentProcessor{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&operatorv1alpha1.SourceCrawler{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Watches(&operatorv1alpha1.VectorEmbeddingsGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).

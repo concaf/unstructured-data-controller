@@ -20,9 +20,6 @@ import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-
-	operatorv1alpha1 "github.com/redhat-data-and-ai/unstructured-data-controller/api/v1alpha1"
 )
 
 const testConditionType = "TestReady"
@@ -111,89 +108,5 @@ func TestIsAlreadyReconciled(t *testing.T) {
 				t.Errorf("IsAlreadyReconciled() = %v, want %v", result, tt.expectedAlreadyReconciled)
 			}
 		})
-	}
-}
-
-func TestReconcileNeededPredicate_Create(t *testing.T) {
-	predicate := ReconcileNeededPredicate{ConditionType: operatorv1alpha1.SourceCrawlerCondition}
-
-	tests := []struct {
-		name           string
-		object         *operatorv1alpha1.SourceCrawler
-		expectedResult bool
-	}{
-		{
-			name: "new CR that has never been reconciled — should reconcile",
-			object: &operatorv1alpha1.SourceCrawler{
-				ObjectMeta: metav1.ObjectMeta{Generation: 1},
-				Status: operatorv1alpha1.SourceCrawlerStatus{
-					LastAppliedGeneration: 0,
-				},
-			},
-			expectedResult: true,
-		},
-		{
-			name: "already reconciled CR — should skip (restart re-list)",
-			object: &operatorv1alpha1.SourceCrawler{
-				ObjectMeta: metav1.ObjectMeta{Generation: 1},
-				Status: operatorv1alpha1.SourceCrawlerStatus{
-					LastAppliedGeneration: 1,
-					Conditions: []metav1.Condition{
-						{Type: operatorv1alpha1.SourceCrawlerCondition, Status: metav1.ConditionTrue},
-					},
-				},
-			},
-			expectedResult: false,
-		},
-		{
-			name: "spec changed since last reconcile — should reconcile",
-			object: &operatorv1alpha1.SourceCrawler{
-				ObjectMeta: metav1.ObjectMeta{Generation: 2},
-				Status: operatorv1alpha1.SourceCrawlerStatus{
-					LastAppliedGeneration: 1,
-					Conditions: []metav1.Condition{
-						{Type: operatorv1alpha1.SourceCrawlerCondition, Status: metav1.ConditionTrue},
-					},
-				},
-			},
-			expectedResult: true,
-		},
-		{
-			name: "last reconcile failed — should reconcile",
-			object: &operatorv1alpha1.SourceCrawler{
-				ObjectMeta: metav1.ObjectMeta{Generation: 1},
-				Status: operatorv1alpha1.SourceCrawlerStatus{
-					LastAppliedGeneration: 1,
-					Conditions: []metav1.Condition{
-						{Type: operatorv1alpha1.SourceCrawlerCondition, Status: metav1.ConditionFalse},
-					},
-				},
-			},
-			expectedResult: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			e := event.CreateEvent{Object: tt.object}
-			result := predicate.Create(e)
-			if result != tt.expectedResult {
-				t.Errorf("ReconcileNeededPredicate.Create() = %v, want %v", result, tt.expectedResult)
-			}
-		})
-	}
-}
-
-func TestReconcileNeededPredicate_OtherEvents(t *testing.T) {
-	predicate := ReconcileNeededPredicate{ConditionType: testConditionType}
-
-	if !predicate.Update(event.UpdateEvent{}) {
-		t.Error("Update() should always return true")
-	}
-	if !predicate.Delete(event.DeleteEvent{}) {
-		t.Error("Delete() should always return true")
-	}
-	if !predicate.Generic(event.GenericEvent{}) {
-		t.Error("Generic() should always return true")
 	}
 }

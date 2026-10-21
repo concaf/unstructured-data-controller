@@ -86,6 +86,21 @@ func (r *SourceCrawlerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
+	// On pod restart, the informer re-lists all CRs as Create events and any
+	// pending RequeueAfter items are lost. Skip expensive work (S3 crawling)
+	// if the spec hasn't changed, but return RequeueAfter to restart the
+	// periodic polling loop. This follows the pattern used by Crossplane and
+	// cert-manager: let all CRs reconcile on restart, but make it cheap.
+	if controllerutils.IsAlreadyReconciled(
+		sourceCrawlerCR.Generation,
+		sourceCrawlerCR.Status.LastAppliedGeneration,
+		sourceCrawlerCR.Status.Conditions,
+		operatorv1alpha1.SourceCrawlerCondition,
+	) {
+		logger.V(1).Info("spec unchanged, restarting poll timer")
+		return ctrl.Result{RequeueAfter: defaultCrawlerResyncInterval}, nil
+	}
+
 	if err := controllerutils.StatusPatch(ctx, r.Client, sourceCrawlerCR, func() {
 		sourceCrawlerCR.SetWaiting()
 	}); err != nil {
@@ -591,10 +606,7 @@ func (r *SourceCrawlerReconciler) findSecretDependents(ctx context.Context, obj 
 // changes to any dependency trigger a reconcile of the owning SourceCrawler.
 func (r *SourceCrawlerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&operatorv1alpha1.SourceCrawler{}, builder.WithPredicates(
-			predicate.GenerationChangedPredicate{},
-			controllerutils.ReconcileNeededPredicate{ConditionType: operatorv1alpha1.SourceCrawlerCondition},
-		)).
+		For(&operatorv1alpha1.SourceCrawler{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&operatorv1alpha1.DocumentProcessor{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Watches(&operatorv1alpha1.VectorEmbeddingsGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).

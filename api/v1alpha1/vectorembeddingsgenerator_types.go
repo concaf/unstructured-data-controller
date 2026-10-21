@@ -156,13 +156,6 @@ func (c *VectorEmbeddingsGeneratorConfig) SetDefaults() {
 	}
 }
 
-func (c *VectorEmbeddingsGenerator) GetLastAppliedGeneration() int64 {
-	return c.Status.LastAppliedGeneration
-}
-func (c *VectorEmbeddingsGenerator) GetStatusConditions() []metav1.Condition {
-	return c.Status.Conditions
-}
-
 func init() {
 	SchemeBuilder.Register(&VectorEmbeddingsGenerator{}, &VectorEmbeddingsGeneratorList{})
 }

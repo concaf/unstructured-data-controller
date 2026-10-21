@@ -89,6 +89,18 @@ func (r *ChunksGeneratorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
+	// On pod restart, skip expensive work (langchain calls) if the spec hasn't
+	// changed, but return RequeueAfter to restart the processing poll loop.
+	if controllerutils.IsAlreadyReconciled(
+		chunksGeneratorCR.Generation,
+		chunksGeneratorCR.Status.LastAppliedGeneration,
+		chunksGeneratorCR.Status.Conditions,
+		operatorv1alpha1.ChunksGeneratorCondition,
+	) {
+		logger.V(1).Info("spec unchanged, restarting poll timer")
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
+	}
+
 	chunksGeneratorCR = chunksGeneratorCR.DeepCopy()
 	chunksGeneratorCR.Spec.ChunksGeneratorConfig.SetDefaults()
 
@@ -369,10 +381,7 @@ func (r *ChunksGeneratorReconciler) findDependents(ctx context.Context, obj clie
 // SetupWithManager sets up the controller with the Manager.
 func (r *ChunksGeneratorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&operatorv1alpha1.ChunksGenerator{}, builder.WithPredicates(
-			predicate.GenerationChangedPredicate{},
-			controllerutils.ReconcileNeededPredicate{ConditionType: operatorv1alpha1.ChunksGeneratorCondition},
-		)).
+		For(&operatorv1alpha1.ChunksGenerator{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&operatorv1alpha1.SourceCrawler{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Watches(&operatorv1alpha1.DocumentProcessor{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Watches(&operatorv1alpha1.VectorEmbeddingsGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).

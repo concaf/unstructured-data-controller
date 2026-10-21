@@ -80,6 +80,18 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 		return ctrl.Result{}, err
 	}
 
+	// On pod restart, skip expensive work (embedding API calls) if the spec
+	// hasn't changed, but return RequeueAfter to restart the processing loop.
+	if controllerutils.IsAlreadyReconciled(
+		vectorEmbeddingsGeneratorCR.Generation,
+		vectorEmbeddingsGeneratorCR.Status.LastAppliedGeneration,
+		vectorEmbeddingsGeneratorCR.Status.Conditions,
+		operatorv1alpha1.VectorEmbeddingGenerationConditionType,
+	) {
+		logger.V(1).Info("spec unchanged, restarting poll timer")
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
+	}
+
 	vectorEmbeddingsGeneratorCR = vectorEmbeddingsGeneratorCR.DeepCopy()
 	vectorEmbeddingsGeneratorCR.Spec.VectorEmbeddingsGeneratorConfig.SetDefaults()
 
@@ -398,10 +410,7 @@ func (r *VectorEmbeddingsGeneratorReconciler) findDependents(ctx context.Context
 // SetupWithManager sets up the controller with the Manager.
 func (r *VectorEmbeddingsGeneratorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&operatorv1alpha1.VectorEmbeddingsGenerator{}, builder.WithPredicates(
-			predicate.GenerationChangedPredicate{},
-			controllerutils.ReconcileNeededPredicate{ConditionType: operatorv1alpha1.VectorEmbeddingGenerationConditionType},
-		)).
+		For(&operatorv1alpha1.VectorEmbeddingsGenerator{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&operatorv1alpha1.SourceCrawler{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Watches(&operatorv1alpha1.DocumentProcessor{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).
 		Watches(&operatorv1alpha1.ChunksGenerator{}, handler.EnqueueRequestsFromMapFunc(r.findDependents), builder.WithPredicates(controllerutils.FilesProcessedChangedPredicate{})).

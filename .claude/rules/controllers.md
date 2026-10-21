@@ -16,8 +16,9 @@ Best practices from controller-runtime, cluster-api, and cert-manager take prece
 1. `log.FromContext(ctx)` - never create standalone loggers
 2. Check `IsConfigCRHealthy()` - requeue if not ready
 3. `Get` the CR - return nil on NotFound (resource deleted, not an error)
-4. Reconcile logic in focused helper methods
-5. On error: update CR status with the error, return the error. Do NOT log the error AND return it - that double-logs.
+4. Check `IsAlreadyReconciled()` - if spec unchanged, skip expensive work but return `RequeueAfter` to restart polling loops (for controllers that poll external state). Do NOT use predicates for this - predicates block the Create event entirely on restart, preventing RequeueAfter from being re-established.
+5. Reconcile logic in focused helper methods
+6. On error: update CR status with the error, return the error. Do NOT log the error AND return it - that double-logs.
 
 ## Error Handling
 - Always check `if err != nil` - never use `if err == nil` as the happy-path guard
