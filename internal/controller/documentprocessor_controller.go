@@ -84,16 +84,28 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	// On pod restart, skip expensive work (docling calls, S3 file checks) if
-	// the spec hasn't changed. No RequeueAfter needed because this controller
-	// is event-driven via FilesProcessedChangedPredicate from upstream stages.
+	// the spec hasn't changed AND the upstream stage hasn't produced new files.
+	// Checking upstream filesProcessed ensures we don't miss work that arrived
+	// while the controller was down (watch events are lost on restart).
 	if controllerutils.IsAlreadyReconciled(
 		documentProcessorCR.Generation,
 		documentProcessorCR.Status.LastAppliedGeneration,
 		documentProcessorCR.Status.Conditions,
 		operatorv1alpha1.DocumentProcessorCondition,
 	) {
-		logger.V(1).Info("spec unchanged, skipping reconciliation")
-		return ctrl.Result{}, nil
+		if len(documentProcessorCR.Spec.DependsOn) == 0 {
+			logger.V(1).Info("spec unchanged, skipping reconciliation")
+			return ctrl.Result{}, nil
+		}
+		pipelineName, pipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(documentProcessorCR)
+		if pipelineErr == nil {
+			upstreamName := controllerutils.StageCRName(pipelineName, documentProcessorCR.Spec.DependsOn[0].Name)
+			upstreamFiles, upstreamErr := controllerutils.GetUpstreamFilesProcessed(ctx, r.Client, upstreamName, documentProcessorCR.Namespace)
+			if upstreamErr == nil && !controllerutils.HasUpstreamChanged(upstreamFiles, documentProcessorCR.Status.UpstreamFilesProcessed) {
+				logger.V(1).Info("spec unchanged and no new upstream files, skipping reconciliation")
+				return ctrl.Result{}, nil
+			}
+		}
 	}
 
 	documentProcessorCR = documentProcessorCR.DeepCopy()
@@ -214,6 +226,18 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	logger.Info("all jobs are completed, no need to requeue")
+
+	// Record the upstream's current filesProcessed so on restart we can detect
+	// new work without relying on watch events.
+	if len(documentProcessorCR.Spec.DependsOn) > 0 {
+		upstreamPipeline, upstreamPipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(documentProcessorCR)
+		if upstreamPipelineErr == nil {
+			upstreamName := upstreamPipeline + "-" + documentProcessorCR.Spec.DependsOn[0].Name
+			if upstreamFiles, upstreamErr := controllerutils.GetUpstreamFilesProcessed(ctx, r.Client, upstreamName, documentProcessorCR.Namespace); upstreamErr == nil {
+				documentProcessorCR.Status.UpstreamFilesProcessed = upstreamFiles
+			}
+		}
+	}
 
 	successMessage := fmt.Sprintf("successfully reconciled document processor: %s", documentProcessorCR.Name)
 	if err := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
@@ -541,7 +565,7 @@ func (r *DocumentProcessorReconciler) findDependents(ctx context.Context, obj cl
 			continue
 		}
 		for _, dep := range item.Spec.DependsOn {
-			if pipelineName+"-"+dep.Name == changedName {
+			if controllerutils.StageCRName(pipelineName, dep.Name) == changedName {
 				requests = append(requests, reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: item.Name, Namespace: item.Namespace},
 				})

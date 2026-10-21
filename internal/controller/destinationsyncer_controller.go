@@ -76,16 +76,26 @@ func (r *DestinationSyncerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	// On pod restart, skip expensive work (destination syncing) if the spec
-	// hasn't changed. DestinationSyncer doesn't poll periodically - it's
-	// triggered by upstream stage changes via FilesProcessedChangedPredicate.
+	// hasn't changed AND the upstream stage hasn't produced new files.
 	if controllerutils.IsAlreadyReconciled(
 		destinationSyncCR.Generation,
 		destinationSyncCR.Status.LastAppliedGeneration,
 		destinationSyncCR.Status.Conditions,
 		operatorv1alpha1.DestinationSyncerCondition,
 	) {
-		logger.V(1).Info("spec unchanged, skipping reconciliation")
-		return ctrl.Result{}, nil
+		if len(destinationSyncCR.Spec.DependsOn) == 0 {
+			logger.V(1).Info("spec unchanged, skipping reconciliation")
+			return ctrl.Result{}, nil
+		}
+		pipelineName, pipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(destinationSyncCR)
+		if pipelineErr == nil {
+			upstreamName := controllerutils.StageCRName(pipelineName, destinationSyncCR.Spec.DependsOn[0].Name)
+			upstreamFiles, upstreamErr := controllerutils.GetUpstreamFilesProcessed(ctx, r.Client, upstreamName, destinationSyncCR.Namespace)
+			if upstreamErr == nil && !controllerutils.HasUpstreamChanged(upstreamFiles, destinationSyncCR.Status.UpstreamFilesProcessed) {
+				logger.V(1).Info("spec unchanged and no new upstream files, skipping reconciliation")
+				return ctrl.Result{}, nil
+			}
+		}
 	}
 
 	if err := controllerutils.StatusPatch(ctx, r.Client, destinationSyncCR, func() {
@@ -146,6 +156,16 @@ func (r *DestinationSyncerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		logger.Info("successfully ingested files to destination", "stage", dep.Name)
 	}
 
+	if len(destinationSyncCR.Spec.DependsOn) > 0 {
+		upstreamPipeline, upstreamPipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(destinationSyncCR)
+		if upstreamPipelineErr == nil {
+			upstreamName := upstreamPipeline + "-" + destinationSyncCR.Spec.DependsOn[0].Name
+			if upstreamFiles, upstreamErr := controllerutils.GetUpstreamFilesProcessed(ctx, r.Client, upstreamName, destinationSyncCR.Namespace); upstreamErr == nil {
+				destinationSyncCR.Status.UpstreamFilesProcessed = upstreamFiles
+			}
+		}
+	}
+
 	successMessage := fmt.Sprintf("successfully reconciled destination sync: %s", destinationSyncCR.Name)
 	if err := controllerutils.StatusPatch(ctx, r.Client, destinationSyncCR, func() {
 		destinationSyncCR.Status.FilesProcessed += totalFilesSynced
@@ -184,7 +204,7 @@ func (r *DestinationSyncerReconciler) findDependents(ctx context.Context, obj cl
 			continue
 		}
 		for _, dep := range item.Spec.DependsOn {
-			if pipelineName+"-"+dep.Name == changedName {
+			if controllerutils.StageCRName(pipelineName, dep.Name) == changedName {
 				requests = append(requests, reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: item.Name, Namespace: item.Namespace},
 				})

@@ -111,6 +111,10 @@ type DocumentProcessorStatus struct {
 	Jobs                    []Job              `json:"jobs,omitempty"`
 	PermanentlyFailingFiles []string           `json:"permanentlyFailingFiles,omitempty"`
 	FilesProcessed          int64              `json:"filesProcessed,omitempty"`
+	// UpstreamFilesProcessed records the upstream stage's filesProcessed count
+	// at the time of last successful reconcile. On restart, comparing this against
+	// the upstream's current count detects new work without relying on watch events.
+	UpstreamFilesProcessed int64 `json:"upstreamFilesProcessed,omitempty"`
 }
 
 type Job struct {

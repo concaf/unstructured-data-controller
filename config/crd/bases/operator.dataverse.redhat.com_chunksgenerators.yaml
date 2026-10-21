@@ -184,6 +184,9 @@ spec:
               lastAppliedGeneration:
                 format: int64
                 type: integer
+              upstreamFilesProcessed:
+                format: int64
+                type: integer
             type: object
         type: object
     served: true

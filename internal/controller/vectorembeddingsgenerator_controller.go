@@ -80,16 +80,26 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 	}
 
 	// On pod restart, skip expensive work (embedding API calls, S3 file checks)
-	// if the spec hasn't changed. No RequeueAfter needed because this controller
-	// is event-driven via FilesProcessedChangedPredicate from upstream stages.
+	// if the spec hasn't changed AND the upstream stage hasn't produced new files.
 	if controllerutils.IsAlreadyReconciled(
 		vectorEmbeddingsGeneratorCR.Generation,
 		vectorEmbeddingsGeneratorCR.Status.LastAppliedGeneration,
 		vectorEmbeddingsGeneratorCR.Status.Conditions,
 		operatorv1alpha1.VectorEmbeddingGenerationConditionType,
 	) {
-		logger.V(1).Info("spec unchanged, skipping reconciliation")
-		return ctrl.Result{}, nil
+		if len(vectorEmbeddingsGeneratorCR.Spec.DependsOn) == 0 {
+			logger.V(1).Info("spec unchanged, skipping reconciliation")
+			return ctrl.Result{}, nil
+		}
+		pipelineName, pipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(vectorEmbeddingsGeneratorCR)
+		if pipelineErr == nil {
+			upstreamName := controllerutils.StageCRName(pipelineName, vectorEmbeddingsGeneratorCR.Spec.DependsOn[0].Name)
+			upstreamFiles, upstreamErr := controllerutils.GetUpstreamFilesProcessed(ctx, r.Client, upstreamName, vectorEmbeddingsGeneratorCR.Namespace)
+			if upstreamErr == nil && !controllerutils.HasUpstreamChanged(upstreamFiles, vectorEmbeddingsGeneratorCR.Status.UpstreamFilesProcessed) {
+				logger.V(1).Info("spec unchanged and no new upstream files, skipping reconciliation")
+				return ctrl.Result{}, nil
+			}
+		}
 	}
 
 	vectorEmbeddingsGeneratorCR = vectorEmbeddingsGeneratorCR.DeepCopy()
@@ -144,6 +154,16 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 	if len(embeddingErrors) > 0 {
 		logger.Error(embeddingErrors[0], "failed to process some chunked files")
 		return r.handleError(ctx, vectorEmbeddingsGeneratorCR, errors.New("failed to process some chunked files"))
+	}
+
+	if len(vectorEmbeddingsGeneratorCR.Spec.DependsOn) > 0 {
+		upstreamPipeline, upstreamPipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(vectorEmbeddingsGeneratorCR)
+		if upstreamPipelineErr == nil {
+			upstreamName := upstreamPipeline + "-" + vectorEmbeddingsGeneratorCR.Spec.DependsOn[0].Name
+			if upstreamFiles, upstreamErr := controllerutils.GetUpstreamFilesProcessed(ctx, r.Client, upstreamName, vectorEmbeddingsGeneratorCR.Namespace); upstreamErr == nil {
+				vectorEmbeddingsGeneratorCR.Status.UpstreamFilesProcessed = upstreamFiles
+			}
+		}
 	}
 
 	// all done, let's update the status to ready
@@ -394,7 +414,7 @@ func (r *VectorEmbeddingsGeneratorReconciler) findDependents(ctx context.Context
 			continue
 		}
 		for _, dep := range item.Spec.DependsOn {
-			if pipelineName+"-"+dep.Name == changedName {
+			if controllerutils.StageCRName(pipelineName, dep.Name) == changedName {
 				requests = append(requests, reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: item.Name, Namespace: item.Namespace},
 				})

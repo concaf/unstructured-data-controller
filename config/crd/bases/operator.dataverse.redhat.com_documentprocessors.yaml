@@ -343,6 +343,13 @@ spec:
                 items:
                   type: string
                 type: array
+              upstreamFilesProcessed:
+                description: |-
+                  UpstreamFilesProcessed records the upstream stage's filesProcessed count
+                  at the time of last successful reconcile. On restart, comparing this against
+                  the upstream's current count detects new work without relying on watch events.
+                format: int64
+                type: integer
             type: object
         type: object
     served: true

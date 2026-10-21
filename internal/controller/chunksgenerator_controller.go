@@ -89,16 +89,26 @@ func (r *ChunksGeneratorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	// On pod restart, skip expensive work (langchain calls, S3 file checks) if
-	// the spec hasn't changed. No RequeueAfter needed because this controller
-	// is event-driven via FilesProcessedChangedPredicate from upstream stages.
+	// the spec hasn't changed AND the upstream stage hasn't produced new files.
 	if controllerutils.IsAlreadyReconciled(
 		chunksGeneratorCR.Generation,
 		chunksGeneratorCR.Status.LastAppliedGeneration,
 		chunksGeneratorCR.Status.Conditions,
 		operatorv1alpha1.ChunksGeneratorCondition,
 	) {
-		logger.V(1).Info("spec unchanged, skipping reconciliation")
-		return ctrl.Result{}, nil
+		if len(chunksGeneratorCR.Spec.DependsOn) == 0 {
+			logger.V(1).Info("spec unchanged, skipping reconciliation")
+			return ctrl.Result{}, nil
+		}
+		pipelineName, pipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(chunksGeneratorCR)
+		if pipelineErr == nil {
+			upstreamName := controllerutils.StageCRName(pipelineName, chunksGeneratorCR.Spec.DependsOn[0].Name)
+			upstreamFiles, upstreamErr := controllerutils.GetUpstreamFilesProcessed(ctx, r.Client, upstreamName, chunksGeneratorCR.Namespace)
+			if upstreamErr == nil && !controllerutils.HasUpstreamChanged(upstreamFiles, chunksGeneratorCR.Status.UpstreamFilesProcessed) {
+				logger.V(1).Info("spec unchanged and no new upstream files, skipping reconciliation")
+				return ctrl.Result{}, nil
+			}
+		}
 	}
 
 	chunksGeneratorCR = chunksGeneratorCR.DeepCopy()
@@ -167,6 +177,16 @@ func (r *ChunksGeneratorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{
 			RequeueAfter: requeueAfter,
 		}, nil
+	}
+
+	if len(chunksGeneratorCR.Spec.DependsOn) > 0 {
+		upstreamPipeline, upstreamPipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(chunksGeneratorCR)
+		if upstreamPipelineErr == nil {
+			upstreamName := upstreamPipeline + "-" + chunksGeneratorCR.Spec.DependsOn[0].Name
+			if upstreamFiles, upstreamErr := controllerutils.GetUpstreamFilesProcessed(ctx, r.Client, upstreamName, chunksGeneratorCR.Namespace); upstreamErr == nil {
+				chunksGeneratorCR.Status.UpstreamFilesProcessed = upstreamFiles
+			}
+		}
 	}
 
 	successMessage := fmt.Sprintf("successfully reconciled chunks generator: %s", chunksGeneratorCR.Name)
@@ -365,7 +385,7 @@ func (r *ChunksGeneratorReconciler) findDependents(ctx context.Context, obj clie
 			continue
 		}
 		for _, dep := range item.Spec.DependsOn {
-			if pipelineName+"-"+dep.Name == changedName {
+			if controllerutils.StageCRName(pipelineName, dep.Name) == changedName {
 				requests = append(requests, reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: item.Name, Namespace: item.Namespace},
 				})
