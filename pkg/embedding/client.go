@@ -57,6 +57,10 @@ type HTTPClient struct {
 	Config *HTTPClientConfig
 }
 
+// NewHTTPClient creates an embedding HTTP client with automatic retry on
+// transient errors (429, 5xx). Retries are safe because embedding generation
+// is idempotent (same input always produces the same output), though retries
+// may increase API costs if the provider charges per-call.
 func NewHTTPClient(config *HTTPClientConfig) *HTTPClient {
 	return &HTTPClient{
 		Client: httpclient.NewWithRetry(HTTPClientTimeout),

@@ -118,6 +118,7 @@ type DoclingRequestPayload struct {
 type Client struct {
 	ClientConfig    *ClientConfig `json:"client_config"`
 	retryHTTPClient *http.Client  // reused across requests for connection pooling
+	plainHTTPClient *http.Client  // no retry, for non-idempotent requests like task creation
 }
 
 type DoclingResponse struct {
@@ -153,6 +154,7 @@ func NewClientFromURL(clientConfig *ClientConfig) *Client {
 	return &Client{
 		ClientConfig:    clientConfig,
 		retryHTTPClient: httpclient.NewWithRetry(clientConfig.HTTPTimeout),
+		plainHTTPClient: &http.Client{Timeout: clientConfig.HTTPTimeout},
 	}
 }
 
@@ -250,11 +252,7 @@ func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, 
 		if resp.StatusCode == http.StatusNotFound {
 			return nil, ErrTaskNotFound
 		}
-		logger.Error(errors.New("received non-200 OK response from endpoint"),
-			"docling request returned non-200 status",
-			"statusCode", resp.StatusCode,
-			"url", endpoint)
-		return nil, fmt.Errorf("failed to process request: status code %d", resp.StatusCode)
+		return nil, fmt.Errorf("docling request to %s returned status %d", endpoint, resp.StatusCode)
 	}
 
 	return resp.Body, nil
@@ -307,9 +305,8 @@ func (c *Client) ConvertFile(
 	// could create duplicate untracked tasks in docling. Use a plain HTTP
 	// client instead of the retry client.
 	var asyncResponse AsyncDoclingResponse
-	plainHTTPClient := &http.Client{Timeout: c.ClientConfig.HTTPTimeout}
 
-	resp, err := c.sendWithAuthFallback(ctx, plainHTTPClient, http.MethodPost, convertSourceAsyncEndpoint, payload)
+	resp, err := c.sendWithAuthFallback(ctx, c.plainHTTPClient, http.MethodPost, convertSourceAsyncEndpoint, payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send convert request: %w", err)
 	}

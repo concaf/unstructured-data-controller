@@ -27,19 +27,25 @@ const (
 	// Default retry configuration for external service calls.
 	// Retries up to 7 times with exponential backoff (1s to 2min),
 	// then fails so the reconcile requeue can take over.
-	DefaultRetryMax     = 7
-	DefaultRetryWaitMin = 1 * time.Second
-	DefaultRetryWaitMax = 2 * time.Minute
+	DefaultRetryMax         = 7
+	DefaultRetryInitialWait = 1 * time.Second
+	DefaultRetryMaxWait     = 2 * time.Minute
 )
 
 // NewWithRetry creates an *http.Client that automatically retries on transient
 // HTTP errors (429, 5xx) using hashicorp/go-retryablehttp. The timeout applies
 // to each individual attempt, not the total time across all retries.
+//
+// Total wall time across all retries is bounded by:
+// (RetryMax+1)*timeout + sum(backoff waits). With defaults and a 2min timeout,
+// worst case is 8*120s + 127s backoff = ~18min. This is acceptable because
+// controller-runtime will cancel the context on shutdown, and the reconcile
+// will be retried with backoff if the external service is persistently down.
 func NewWithRetry(timeout time.Duration) *http.Client {
 	retryClient := retryablehttp.NewClient()
 	retryClient.RetryMax = DefaultRetryMax
-	retryClient.RetryWaitMin = DefaultRetryWaitMin
-	retryClient.RetryWaitMax = DefaultRetryWaitMax
+	retryClient.RetryWaitMin = DefaultRetryInitialWait
+	retryClient.RetryWaitMax = DefaultRetryMaxWait
 	// Suppress go-retryablehttp's default logger. The controller already logs
 	// via controller-runtime's structured logger.
 	retryClient.Logger = nil

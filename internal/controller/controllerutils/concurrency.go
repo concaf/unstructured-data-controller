@@ -19,6 +19,8 @@ package controllerutils
 import (
 	"os"
 	"strconv"
+
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -43,12 +45,17 @@ const (
 // concurrencyFromEnv reads a concurrency value from an environment variable,
 // falling back to DefaultReconcilerConcurrency if the variable is unset or invalid.
 func concurrencyFromEnv(envVar string) int {
-	if val := os.Getenv(envVar); val != "" {
-		if n, err := strconv.Atoi(val); err == nil && n > 0 {
-			return n
-		}
+	val := os.Getenv(envVar)
+	if val == "" {
+		return DefaultReconcilerConcurrency
 	}
-	return DefaultReconcilerConcurrency
+	n, err := strconv.Atoi(val)
+	if err != nil || n <= 0 {
+		log.Log.Info("ignoring invalid concurrency env var, using default",
+			"envVar", envVar, "value", val, "default", DefaultReconcilerConcurrency)
+		return DefaultReconcilerConcurrency
+	}
+	return n
 }
 
 // BuildGroupKindConcurrency builds a GroupKindConcurrency map for controller-runtime's

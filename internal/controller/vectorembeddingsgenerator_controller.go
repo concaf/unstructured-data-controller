@@ -47,8 +47,7 @@ const (
 
 type VectorEmbeddingsGeneratorReconciler struct {
 	client.Client
-	Scheme    *runtime.Scheme
-	fileStore *filestore.FileStore
+	Scheme *runtime.Scheme
 }
 
 // +kubebuilder:rbac:groups=operator.dataverse.redhat.com,namespace=unstructured-controller-namespace,resources=vectorembeddingsgenerators,verbs=get;list;watch;create;update;patch;delete
@@ -114,15 +113,13 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 		logger.Error(err, "failed to create the filestore client")
 		return r.handleError(ctx, vectorEmbeddingsGeneratorCR, err)
 	}
-	r.fileStore = fs
-
 	pipelineName, err := controllerutils.ParentPipelineNameFromOwnerReference(vectorEmbeddingsGeneratorCR)
 	if err != nil {
 		return r.handleError(ctx, vectorEmbeddingsGeneratorCR, err)
 	}
 	inputPath := unstructured.StagePath(pipelineName, vectorEmbeddingsGeneratorCR.Spec.DependsOn[0].Name)
 	outputPath := unstructured.StagePath(pipelineName, vectorEmbeddingsGeneratorCR.Spec.StageName)
-	filePaths, err := r.fileStore.ListFilesInPath(ctx, inputPath)
+	filePaths, err := fs.ListFilesInPath(ctx, inputPath)
 	logger.Info("files in path", "count", len(filePaths))
 	if err != nil {
 		logger.Error(err, "failed to list files in path")
@@ -133,7 +130,7 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 	var filesProcessed int64
 	for _, chunksFilePath := range filePaths {
 		logger.Info("processing chunked file for embedding", "file", chunksFilePath)
-		processed, err := r.processChunkedFile(ctx, chunksFilePath, vectorEmbeddingsGeneratorCR, inputPath, outputPath)
+		processed, err := processChunkedFile(ctx, chunksFilePath, vectorEmbeddingsGeneratorCR, inputPath, outputPath, fs)
 		if err != nil {
 			embeddingErrors = append(embeddingErrors, err)
 			logger.Error(err, "failed to process chunked file", "file", chunksFilePath)
@@ -163,11 +160,11 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 	return ctrl.Result{}, nil
 }
 
-func (r *VectorEmbeddingsGeneratorReconciler) processChunkedFile(ctx context.Context, chunksFilePath string, vectorEmbeddingsGeneratorCR *operatorv1alpha1.VectorEmbeddingsGenerator, inputPath, outputPath string) (bool, error) {
+func processChunkedFile(ctx context.Context, chunksFilePath string, vectorEmbeddingsGeneratorCR *operatorv1alpha1.VectorEmbeddingsGenerator, inputPath, outputPath string, fs *filestore.FileStore) (bool, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("processing chunked file", "chunksFilePath", chunksFilePath)
 
-	needsEmbedding, err := r.needsEmbedding(ctx, chunksFilePath, vectorEmbeddingsGeneratorCR, inputPath, outputPath)
+	needsEmbedding, err := needsEmbedding(ctx, chunksFilePath, vectorEmbeddingsGeneratorCR, inputPath, outputPath, fs)
 	if err != nil {
 		logger.Error(err, "failed to check if file needs embedding")
 		return false, err
@@ -178,7 +175,7 @@ func (r *VectorEmbeddingsGeneratorReconciler) processChunkedFile(ctx context.Con
 	}
 
 	logger.Info("retrieving chunked file from filestore", "file", chunksFilePath)
-	chunkedFileRaw, err := r.fileStore.Retrieve(ctx, chunksFilePath)
+	chunkedFileRaw, err := fs.Retrieve(ctx, chunksFilePath)
 	if err != nil {
 		logger.Error(err, "failed to retrieve chunked file")
 		return false, err
@@ -293,7 +290,7 @@ func (r *VectorEmbeddingsGeneratorReconciler) processChunkedFile(ctx context.Con
 
 	embeddingsFilePath := unstructured.RemapToOutputDir(chunksFilePath, inputPath, outputPath)
 	logger.Info("storing embedded file", "embeddingsFilePath", embeddingsFilePath)
-	if err := r.fileStore.Store(ctx, embeddingsFilePath, embeddingsFileBytes); err != nil {
+	if err := fs.Store(ctx, embeddingsFilePath, embeddingsFileBytes); err != nil {
 		logger.Error(err, "failed to store embedded file")
 		return false, err
 	}
@@ -302,11 +299,11 @@ func (r *VectorEmbeddingsGeneratorReconciler) processChunkedFile(ctx context.Con
 	return true, nil
 }
 
-func (r *VectorEmbeddingsGeneratorReconciler) needsEmbedding(ctx context.Context, chunksFilePath string, vectorEmbeddingsGeneratorCR *operatorv1alpha1.VectorEmbeddingsGenerator, inputPath, outputPath string) (bool, error) {
+func needsEmbedding(ctx context.Context, chunksFilePath string, vectorEmbeddingsGeneratorCR *operatorv1alpha1.VectorEmbeddingsGenerator, inputPath, outputPath string, fs *filestore.FileStore) (bool, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("checking if file needs embedding", "file", chunksFilePath)
 
-	chunksFileExists, err := r.fileStore.Exists(ctx, chunksFilePath)
+	chunksFileExists, err := fs.Exists(ctx, chunksFilePath)
 	if err != nil {
 		return false, err
 	}
@@ -316,7 +313,7 @@ func (r *VectorEmbeddingsGeneratorReconciler) needsEmbedding(ctx context.Context
 		return false, err
 	}
 
-	chunkedFileRaw, err := r.fileStore.Retrieve(ctx, chunksFilePath)
+	chunkedFileRaw, err := fs.Retrieve(ctx, chunksFilePath)
 	if err != nil {
 		return false, err
 	}
@@ -328,13 +325,13 @@ func (r *VectorEmbeddingsGeneratorReconciler) needsEmbedding(ctx context.Context
 
 	embeddingsFilePath := unstructured.RemapToOutputDir(chunksFilePath, inputPath, outputPath)
 	logger.Info("embeddings file path", "embeddingsFilePath", embeddingsFilePath)
-	embeddingsFileExists, err := r.fileStore.Exists(ctx, embeddingsFilePath)
+	embeddingsFileExists, err := fs.Exists(ctx, embeddingsFilePath)
 	if err != nil {
 		return false, err
 	}
 
 	if embeddingsFileExists {
-		embeddingsFileRaw, err := r.fileStore.Retrieve(ctx, embeddingsFilePath)
+		embeddingsFileRaw, err := fs.Retrieve(ctx, embeddingsFilePath)
 		if err != nil {
 			return false, err
 		}
