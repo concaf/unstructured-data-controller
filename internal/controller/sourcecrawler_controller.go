@@ -85,25 +85,10 @@ func (r *SourceCrawlerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	// On pod restart, the informer re-lists all CRs as Create events and any
-	// pending RequeueAfter items are lost. Skip expensive work (S3 crawling)
-	// if the spec hasn't changed, but return RequeueAfter to restart the
-	// periodic polling loop. This follows the pattern used by Crossplane and
-	// cert-manager: let all CRs reconcile on restart, but make it cheap.
-	//
-	// Note: this uses defaultCrawlerResyncInterval (2min) for all source types.
-	// SQS crawlers will transition to their long-poll loop on the next full
-	// reconcile, and git crawlers will pick up their configured PollInterval.
-	// The 2min is a safe default that restarts polling without being too aggressive.
-	if controllerutils.IsAlreadyReconciled(
-		sourceCrawlerCR.Generation,
-		sourceCrawlerCR.Status.LastAppliedGeneration,
-		sourceCrawlerCR.Status.Conditions,
-		operatorv1alpha1.SourceCrawlerCondition,
-	) {
-		logger.V(1).Info("spec unchanged, restarting poll timer")
-		return ctrl.Result{RequeueAfter: defaultCrawlerResyncInterval}, nil
-	}
+	// No IsAlreadyReconciled check here. SourceCrawler polls external state
+	// (S3, GDrive, Git) that has no K8s event - it must run every reconcile
+	// to detect new files. The generation check would block the polling loop
+	// since the spec doesn't change when new files appear externally.
 
 	if err := controllerutils.StatusPatch(ctx, r.Client, sourceCrawlerCR, func() {
 		sourceCrawlerCR.SetWaiting()
