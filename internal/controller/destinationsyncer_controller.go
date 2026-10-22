@@ -90,7 +90,7 @@ func (r *DestinationSyncerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		pipelineName, pipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(destinationSyncCR)
 		if pipelineErr == nil {
 			upstreamName := controllerutils.StageCRName(pipelineName, destinationSyncCR.Spec.DependsOn[0].Name)
-			upstreamFiles, upstreamErr := controllerutils.GetUpstreamFilesProcessed(ctx, r.Client, upstreamName, destinationSyncCR.Namespace)
+			upstreamFiles, upstreamErr := controllerutils.UpstreamFilesProcessed(ctx, r.Client, upstreamName, destinationSyncCR.Namespace)
 			if upstreamErr == nil && !controllerutils.HasUpstreamChanged(upstreamFiles, destinationSyncCR.Status.UpstreamFilesProcessed) {
 				logger.V(1).Info("spec unchanged and no new upstream files, skipping reconciliation")
 				return ctrl.Result{}, nil
@@ -156,12 +156,13 @@ func (r *DestinationSyncerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		logger.Info("successfully ingested files to destination", "stage", dep.Name)
 	}
 
+	var latestUpstreamFiles int64
 	if len(destinationSyncCR.Spec.DependsOn) > 0 {
 		upstreamPipeline, upstreamPipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(destinationSyncCR)
 		if upstreamPipelineErr == nil {
-			upstreamName := upstreamPipeline + "-" + destinationSyncCR.Spec.DependsOn[0].Name
-			if upstreamFiles, upstreamErr := controllerutils.GetUpstreamFilesProcessed(ctx, r.Client, upstreamName, destinationSyncCR.Namespace); upstreamErr == nil {
-				destinationSyncCR.Status.UpstreamFilesProcessed = upstreamFiles
+			upstreamName := controllerutils.StageCRName(upstreamPipeline, destinationSyncCR.Spec.DependsOn[0].Name)
+			if upstreamFiles, upstreamErr := controllerutils.UpstreamFilesProcessed(ctx, r.Client, upstreamName, destinationSyncCR.Namespace); upstreamErr == nil {
+				latestUpstreamFiles = upstreamFiles
 			}
 		}
 	}
@@ -170,6 +171,7 @@ func (r *DestinationSyncerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	if err := controllerutils.StatusPatch(ctx, r.Client, destinationSyncCR, func() {
 		destinationSyncCR.Status.FilesProcessed += totalFilesSynced
 		destinationSyncCR.UpdateStatus(successMessage, nil)
+		destinationSyncCR.Status.UpstreamFilesProcessed = latestUpstreamFiles
 	}); err != nil {
 		logger.Error(err, "failed to update DestinationSyncer CR status")
 		return r.handleError(ctx, destinationSyncCR, err)

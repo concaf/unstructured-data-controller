@@ -94,7 +94,7 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 		pipelineName, pipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(vectorEmbeddingsGeneratorCR)
 		if pipelineErr == nil {
 			upstreamName := controllerutils.StageCRName(pipelineName, vectorEmbeddingsGeneratorCR.Spec.DependsOn[0].Name)
-			upstreamFiles, upstreamErr := controllerutils.GetUpstreamFilesProcessed(ctx, r.Client, upstreamName, vectorEmbeddingsGeneratorCR.Namespace)
+			upstreamFiles, upstreamErr := controllerutils.UpstreamFilesProcessed(ctx, r.Client, upstreamName, vectorEmbeddingsGeneratorCR.Namespace)
 			if upstreamErr == nil && !controllerutils.HasUpstreamChanged(upstreamFiles, vectorEmbeddingsGeneratorCR.Status.UpstreamFilesProcessed) {
 				logger.V(1).Info("spec unchanged and no new upstream files, skipping reconciliation")
 				return ctrl.Result{}, nil
@@ -156,12 +156,13 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 		return r.handleError(ctx, vectorEmbeddingsGeneratorCR, errors.New("failed to process some chunked files"))
 	}
 
+	var latestUpstreamFiles int64
 	if len(vectorEmbeddingsGeneratorCR.Spec.DependsOn) > 0 {
 		upstreamPipeline, upstreamPipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(vectorEmbeddingsGeneratorCR)
 		if upstreamPipelineErr == nil {
-			upstreamName := upstreamPipeline + "-" + vectorEmbeddingsGeneratorCR.Spec.DependsOn[0].Name
-			if upstreamFiles, upstreamErr := controllerutils.GetUpstreamFilesProcessed(ctx, r.Client, upstreamName, vectorEmbeddingsGeneratorCR.Namespace); upstreamErr == nil {
-				vectorEmbeddingsGeneratorCR.Status.UpstreamFilesProcessed = upstreamFiles
+			upstreamName := controllerutils.StageCRName(upstreamPipeline, vectorEmbeddingsGeneratorCR.Spec.DependsOn[0].Name)
+			if upstreamFiles, upstreamErr := controllerutils.UpstreamFilesProcessed(ctx, r.Client, upstreamName, vectorEmbeddingsGeneratorCR.Namespace); upstreamErr == nil {
+				latestUpstreamFiles = upstreamFiles
 			}
 		}
 	}
@@ -171,6 +172,7 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 	if err := controllerutils.StatusPatch(ctx, r.Client, vectorEmbeddingsGeneratorCR, func() {
 		vectorEmbeddingsGeneratorCR.Status.FilesProcessed += filesProcessed
 		vectorEmbeddingsGeneratorCR.UpdateStatus(successMessage, nil)
+		vectorEmbeddingsGeneratorCR.Status.UpstreamFilesProcessed = latestUpstreamFiles
 	}); err != nil {
 		logger.Error(err, "failed to update VectorEmbeddingsGenerator CR status", "namespace", vectorEmbeddingsGeneratorCR.Namespace, "name", vectorEmbeddingsGeneratorCR.Name)
 		return r.handleError(ctx, vectorEmbeddingsGeneratorCR, err)

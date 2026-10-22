@@ -100,7 +100,7 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		pipelineName, pipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(documentProcessorCR)
 		if pipelineErr == nil {
 			upstreamName := controllerutils.StageCRName(pipelineName, documentProcessorCR.Spec.DependsOn[0].Name)
-			upstreamFiles, upstreamErr := controllerutils.GetUpstreamFilesProcessed(ctx, r.Client, upstreamName, documentProcessorCR.Namespace)
+			upstreamFiles, upstreamErr := controllerutils.UpstreamFilesProcessed(ctx, r.Client, upstreamName, documentProcessorCR.Namespace)
 			if upstreamErr == nil && !controllerutils.HasUpstreamChanged(upstreamFiles, documentProcessorCR.Status.UpstreamFilesProcessed) {
 				logger.V(1).Info("spec unchanged and no new upstream files, skipping reconciliation")
 				return ctrl.Result{}, nil
@@ -179,24 +179,10 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	inputPath := unstructured.StagePath(pipelineName, documentProcessorCR.Spec.DependsOn[0].Name)
 	outputPath := unstructured.StagePath(pipelineName, documentProcessorCR.Spec.StageName)
 
-	// Check on in-flight docling jobs. If docling lost a task (404), remove
-	// it from the job list so the processDocument loop below can re-submit it.
-	jobProcessingErrors := []error{}
-	var activeJobs []operatorv1alpha1.Job
-	for _, job := range documentProcessorCR.Status.Jobs {
-		logger.Info("reconciling job", "job", job)
-		if err := r.reconcileJob(ctx, job, documentProcessorCR, inputPath, outputPath, fs); err != nil {
-			if errors.Is(err, docling.ErrTaskNotFound) {
-				logger.Info("docling lost track of task, removing stale job so it can be re-submitted",
-					"taskID", job.TaskID, "filePath", job.FilePath)
-				continue
-			}
-			jobProcessingErrors = append(jobProcessingErrors, err)
-			logger.Error(err, "failed to process job", "job", job.FilePath)
-		}
-		activeJobs = append(activeJobs, job)
+	jobProcessingErrors, err := r.reconcileInFlightJobs(ctx, documentProcessorCR, inputPath, outputPath, fs)
+	if err != nil {
+		return r.handleError(ctx, documentProcessorCR, err)
 	}
-	documentProcessorCR.Status.Jobs = activeJobs
 
 	filePaths, err := fs.ListFilesInPath(ctx, inputPath)
 	if err != nil {
@@ -227,14 +213,15 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	logger.Info("all jobs are completed, no need to requeue")
 
-	// Record the upstream's current filesProcessed so on restart we can detect
-	// new work without relying on watch events.
+	// Fetch upstream filesProcessed to record in status. Must be set inside
+	// the StatusPatch mutate callback so the merge patch includes it.
+	var latestUpstreamFiles int64
 	if len(documentProcessorCR.Spec.DependsOn) > 0 {
 		upstreamPipeline, upstreamPipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(documentProcessorCR)
 		if upstreamPipelineErr == nil {
-			upstreamName := upstreamPipeline + "-" + documentProcessorCR.Spec.DependsOn[0].Name
-			if upstreamFiles, upstreamErr := controllerutils.GetUpstreamFilesProcessed(ctx, r.Client, upstreamName, documentProcessorCR.Namespace); upstreamErr == nil {
-				documentProcessorCR.Status.UpstreamFilesProcessed = upstreamFiles
+			upstreamName := controllerutils.StageCRName(upstreamPipeline, documentProcessorCR.Spec.DependsOn[0].Name)
+			if upstreamFiles, upstreamErr := controllerutils.UpstreamFilesProcessed(ctx, r.Client, upstreamName, documentProcessorCR.Namespace); upstreamErr == nil {
+				latestUpstreamFiles = upstreamFiles
 			}
 		}
 	}
@@ -242,6 +229,7 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	successMessage := fmt.Sprintf("successfully reconciled document processor: %s", documentProcessorCR.Name)
 	if err := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
 		documentProcessorCR.UpdateStatus(successMessage, nil)
+		documentProcessorCR.Status.UpstreamFilesProcessed = latestUpstreamFiles
 	}); err != nil {
 		logger.Error(err, "failed to update DocumentProcessor CR status", "namespace", documentProcessorCR.Namespace, "name", documentProcessorCR.Name)
 		return r.handleError(ctx, documentProcessorCR, err)
@@ -249,6 +237,38 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	logger.Info("successfully updated DocumentProcessor CR status", "status", documentProcessorCR.Status)
 
 	return ctrl.Result{}, nil
+}
+
+// reconcileInFlightJobs checks on in-flight docling jobs. If docling lost a
+// task (404), it removes the stale job and persists the change so the
+// processDocument loop can re-submit it.
+func (r *DocumentProcessorReconciler) reconcileInFlightJobs(ctx context.Context, documentProcessorCR *operatorv1alpha1.DocumentProcessor, inputPath, outputPath string, fs *filestore.FileStore) ([]error, error) {
+	logger := log.FromContext(ctx)
+	var jobProcessingErrors []error
+	var activeJobs []operatorv1alpha1.Job
+	for _, job := range documentProcessorCR.Status.Jobs {
+		logger.Info("reconciling job", "job", job)
+		if err := r.reconcileJob(ctx, job, documentProcessorCR, inputPath, outputPath, fs); err != nil {
+			if errors.Is(err, docling.ErrTaskNotFound) {
+				logger.Info("docling lost track of task, removing stale job so it can be re-submitted",
+					"taskID", job.TaskID, "filePath", job.FilePath)
+				continue
+			}
+			jobProcessingErrors = append(jobProcessingErrors, err)
+			logger.Error(err, "failed to process job", "job", job.FilePath)
+		}
+		activeJobs = append(activeJobs, job)
+	}
+	// Persist the updated job list immediately so stale jobs don't reappear
+	// if the reconcile exits via requeue or error before the final StatusPatch.
+	if len(documentProcessorCR.Status.Jobs) != len(activeJobs) {
+		if err := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
+			documentProcessorCR.Status.Jobs = activeJobs
+		}); err != nil {
+			return nil, fmt.Errorf("persisting stale job removal: %w", err)
+		}
+	}
+	return jobProcessingErrors, nil
 }
 
 func (r *DocumentProcessorReconciler) reconcileJob(ctx context.Context, job operatorv1alpha1.Job, documentProcessorCR *operatorv1alpha1.DocumentProcessor, inputPath, outputPath string, fs *filestore.FileStore) (err error) {

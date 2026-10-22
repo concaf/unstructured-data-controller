@@ -25,6 +25,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/httpclient"
@@ -247,11 +248,6 @@ func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, 
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			logger.Error(closeErr, "failed to close response body for non-200 response")
 		}
-		// Return a specific error for 404 so callers can detect stale task IDs
-		// and re-submit instead of polling forever.
-		if resp.StatusCode == http.StatusNotFound {
-			return nil, ErrTaskNotFound
-		}
 		return nil, fmt.Errorf("docling request to %s returned status %d", endpoint, resp.StatusCode)
 	}
 
@@ -348,6 +344,14 @@ func (c *Client) getTaskStatus(ctx context.Context, taskID string) (bool, *TaskS
 	var taskStatusResponse TaskStatusResponse
 	bodyResponse, err := c.doDoclingRequest(ctx, http.MethodGet, getTaskStatusPollEndpoint, nil)
 	if err != nil {
+		// A 404 on the status poll endpoint means docling lost the task
+		// (restart, TTL expiry). Return ErrTaskNotFound so the controller
+		// can remove the stale job and re-submit. This check is intentionally
+		// only in getTaskStatus, not in doDoclingRequest, because a 404 on
+		// the result endpoint has different semantics.
+		if strings.Contains(err.Error(), "status 404") {
+			return false, nil, ErrTaskNotFound
+		}
 		return false, nil, fmt.Errorf("failed to get response body: %w", err)
 	}
 	defer func() {

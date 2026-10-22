@@ -55,12 +55,15 @@ func (FilesProcessedChangedPredicate) Update(e event.UpdateEvent) bool {
 // returning RequeueAfter to restart polling loops. Do NOT use in predicates
 // because predicates block the Create event entirely, preventing RequeueAfter
 // from being re-established after a restart.
+
 // StageCRName returns the Kubernetes resource name for a stage CR within a pipeline.
 // All stage CRs follow the convention: pipelineName-stageName.
 func StageCRName(pipelineName, stageName string) string {
 	return pipelineName + "-" + stageName
 }
 
+// IsAlreadyReconciled returns true when the CR's spec has already been
+// successfully reconciled (generation matches and condition is healthy).
 func IsAlreadyReconciled(generation, lastAppliedGeneration int64, conditions []metav1.Condition, conditionType string) bool {
 	if lastAppliedGeneration != generation {
 		return false
@@ -78,11 +81,11 @@ func HasUpstreamChanged(currentUpstreamFiles, lastSeenUpstreamFiles int64) bool 
 	return currentUpstreamFiles != lastSeenUpstreamFiles
 }
 
-// GetUpstreamFilesProcessed fetches the filesProcessed count from an upstream
+// UpstreamFilesProcessed fetches the filesProcessed count from an upstream
 // stage CR by trying each stage type. Only called in the IsAlreadyReconciled
 // path (restart/no-op), so the cost of up to 5 Gets is acceptable compared to
 // the hundreds of S3 calls a full reconcile would make.
-func GetUpstreamFilesProcessed(ctx context.Context, c client.Client, name, namespace string) (int64, error) {
+func UpstreamFilesProcessed(ctx context.Context, c client.Client, name, namespace string) (int64, error) {
 	key := client.ObjectKey{Name: name, Namespace: namespace}
 	stages := []FilesProcessedGetter{
 		&operatorv1alpha1.SourceCrawler{},

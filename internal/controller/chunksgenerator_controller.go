@@ -103,7 +103,7 @@ func (r *ChunksGeneratorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		pipelineName, pipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(chunksGeneratorCR)
 		if pipelineErr == nil {
 			upstreamName := controllerutils.StageCRName(pipelineName, chunksGeneratorCR.Spec.DependsOn[0].Name)
-			upstreamFiles, upstreamErr := controllerutils.GetUpstreamFilesProcessed(ctx, r.Client, upstreamName, chunksGeneratorCR.Namespace)
+			upstreamFiles, upstreamErr := controllerutils.UpstreamFilesProcessed(ctx, r.Client, upstreamName, chunksGeneratorCR.Namespace)
 			if upstreamErr == nil && !controllerutils.HasUpstreamChanged(upstreamFiles, chunksGeneratorCR.Status.UpstreamFilesProcessed) {
 				logger.V(1).Info("spec unchanged and no new upstream files, skipping reconciliation")
 				return ctrl.Result{}, nil
@@ -179,12 +179,15 @@ func (r *ChunksGeneratorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}, nil
 	}
 
+	// Fetch upstream filesProcessed to record in status. Must be set inside
+	// the StatusPatch mutate callback so the merge patch includes it.
+	var latestUpstreamFiles int64
 	if len(chunksGeneratorCR.Spec.DependsOn) > 0 {
 		upstreamPipeline, upstreamPipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(chunksGeneratorCR)
 		if upstreamPipelineErr == nil {
-			upstreamName := upstreamPipeline + "-" + chunksGeneratorCR.Spec.DependsOn[0].Name
-			if upstreamFiles, upstreamErr := controllerutils.GetUpstreamFilesProcessed(ctx, r.Client, upstreamName, chunksGeneratorCR.Namespace); upstreamErr == nil {
-				chunksGeneratorCR.Status.UpstreamFilesProcessed = upstreamFiles
+			upstreamName := controllerutils.StageCRName(upstreamPipeline, chunksGeneratorCR.Spec.DependsOn[0].Name)
+			if upstreamFiles, upstreamErr := controllerutils.UpstreamFilesProcessed(ctx, r.Client, upstreamName, chunksGeneratorCR.Namespace); upstreamErr == nil {
+				latestUpstreamFiles = upstreamFiles
 			}
 		}
 	}
@@ -193,6 +196,7 @@ func (r *ChunksGeneratorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err := controllerutils.StatusPatch(ctx, r.Client, chunksGeneratorCR, func() {
 		chunksGeneratorCR.Status.FilesProcessed += filesProcessed
 		chunksGeneratorCR.UpdateStatus(successMessage, nil)
+		chunksGeneratorCR.Status.UpstreamFilesProcessed = latestUpstreamFiles
 	}); err != nil {
 		logger.Error(err, "failed to update ChunksGenerator CR status", "namespace", chunksGeneratorCR.Namespace, "name", chunksGeneratorCR.Name)
 		return r.handleError(ctx, chunksGeneratorCR, err)
