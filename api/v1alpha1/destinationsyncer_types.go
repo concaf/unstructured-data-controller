@@ -51,10 +51,10 @@ type DestinationSyncerSpec struct {
 
 // DestinationSyncerStatus defines the observed state of DestinationSyncer.
 type DestinationSyncerStatus struct {
-	LastAppliedGeneration  int64              `json:"lastAppliedGeneration,omitempty"`
-	Conditions             []metav1.Condition `json:"conditions,omitempty"`
-	FilesProcessed         int64              `json:"filesProcessed,omitempty"`
-	UpstreamFilesProcessed int64              `json:"upstreamFilesProcessed,omitempty"`
+	LastAppliedGeneration int64                   `json:"lastAppliedGeneration,omitempty"`
+	Conditions            []metav1.Condition      `json:"conditions,omitempty"`
+	FilesProcessed        int64                   `json:"filesProcessed,omitempty"`
+	ObservedUpstreamState []ObservedUpstreamState `json:"observedUpstreamState,omitempty"`
 }
 
 // +kubebuilder:object:root=true

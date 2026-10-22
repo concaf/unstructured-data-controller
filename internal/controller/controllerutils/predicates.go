@@ -72,13 +72,25 @@ func IsAlreadyReconciled(generation, lastAppliedGeneration int64, conditions []m
 	return condition != nil && condition.Status == metav1.ConditionTrue
 }
 
-// HasUpstreamChanged returns true if the upstream stage produced new files
+// HasUpstreamChanged returns true if any upstream dependency produced new files
 // since this controller last reconciled. Think of a pod restart as going home
 // for the night: when you come back in the morning, you look at the current
 // state of your desk (upstream filesProcessed) rather than relying on messages
 // (watch events) that were sent while you were away.
-func HasUpstreamChanged(currentUpstreamFiles, lastSeenUpstreamFiles int64) bool {
-	return currentUpstreamFiles != lastSeenUpstreamFiles
+func HasUpstreamChanged(currentCounts map[string]int64, observed []operatorv1alpha1.ObservedUpstreamState) bool {
+	if len(currentCounts) != len(observed) {
+		return true
+	}
+	observedMap := make(map[string]int64, len(observed))
+	for _, o := range observed {
+		observedMap[o.Name] = o.FilesProcessed
+	}
+	for name, current := range currentCounts {
+		if current != observedMap[name] {
+			return true
+		}
+	}
+	return false
 }
 
 // UpstreamFilesProcessed fetches the filesProcessed count from an upstream
@@ -105,4 +117,25 @@ func UpstreamFilesProcessed(ctx context.Context, c client.Client, name, namespac
 		return stage.GetFilesProcessed(), nil
 	}
 	return 0, fmt.Errorf("no upstream stage found: %s/%s", namespace, name)
+}
+
+// ShouldSkipDueToUpstream checks all upstream dependencies and returns true if
+// none of them have changed since the last reconcile. Returns false (don't skip)
+// if any upstream can't be read or has new files.
+func ShouldSkipDueToUpstream(
+	ctx context.Context, c client.Client, pipelineName string,
+	dependsOn []operatorv1alpha1.StageDependency, namespace string,
+	observed []operatorv1alpha1.ObservedUpstreamState,
+) bool {
+	currentCounts := map[string]int64{}
+	for _, dep := range dependsOn {
+		upstreamName := StageCRName(pipelineName, dep.Name)
+		upstreamFiles, err := UpstreamFilesProcessed(ctx, c, upstreamName, namespace)
+		if err != nil {
+			// Can't determine upstream state, reconcile to be safe
+			return false
+		}
+		currentCounts[dep.Name] = upstreamFiles
+	}
+	return !HasUpstreamChanged(currentCounts, observed)
 }

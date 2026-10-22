@@ -21,6 +21,16 @@ import (
 	"strings"
 )
 
+// ObservedUpstreamState records an upstream dependency's filesProcessed count
+// at the time of last successful reconcile. Used on restart to detect new work
+// without relying on watch events.
+type ObservedUpstreamState struct {
+	// Name is the dependency name from DependsOn.
+	Name string `json:"name"`
+	// FilesProcessed is the upstream's filesProcessed count when last observed.
+	FilesProcessed int64 `json:"filesProcessed"`
+}
+
 // ValidateStages checks that all dependency references exist and the DAG has no cycles.
 func ValidateStages(stages []PipelineStage) error {
 	stageMap := make(map[string]bool, len(stages))
