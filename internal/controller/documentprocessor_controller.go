@@ -93,8 +93,10 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		documentProcessorCR.Status.Conditions,
 		operatorv1alpha1.DocumentProcessorCondition,
 	) {
-		pipelineName, pipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(documentProcessorCR)
-		if pipelineErr == nil && controllerutils.ShouldSkipDueToUpstream(
+		pipelineName, err := controllerutils.ParentPipelineNameFromOwnerReference(documentProcessorCR)
+		if err != nil {
+			logger.V(1).Info("could not determine pipeline name, proceeding with reconciliation", "error", err)
+		} else if controllerutils.ShouldSkipDueToUpstream(
 			ctx, r.Client, pipelineName, documentProcessorCR.Spec.DependsOn,
 			documentProcessorCR.Namespace, documentProcessorCR.Status.ObservedUpstreamState,
 		) {

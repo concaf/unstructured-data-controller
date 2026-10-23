@@ -96,8 +96,10 @@ func (r *ChunksGeneratorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		chunksGeneratorCR.Status.Conditions,
 		operatorv1alpha1.ChunksGeneratorCondition,
 	) {
-		pipelineName, pipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(chunksGeneratorCR)
-		if pipelineErr == nil && controllerutils.ShouldSkipDueToUpstream(
+		pipelineName, err := controllerutils.ParentPipelineNameFromOwnerReference(chunksGeneratorCR)
+		if err != nil {
+			logger.V(1).Info("could not determine pipeline name, proceeding with reconciliation", "error", err)
+		} else if controllerutils.ShouldSkipDueToUpstream(
 			ctx, r.Client, pipelineName, chunksGeneratorCR.Spec.DependsOn,
 			chunksGeneratorCR.Namespace, chunksGeneratorCR.Status.ObservedUpstreamState,
 		) {

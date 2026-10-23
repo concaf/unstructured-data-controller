@@ -87,8 +87,10 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 		vectorEmbeddingsGeneratorCR.Status.Conditions,
 		operatorv1alpha1.VectorEmbeddingGenerationConditionType,
 	) {
-		pipelineName, pipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(vectorEmbeddingsGeneratorCR)
-		if pipelineErr == nil && controllerutils.ShouldSkipDueToUpstream(
+		pipelineName, err := controllerutils.ParentPipelineNameFromOwnerReference(vectorEmbeddingsGeneratorCR)
+		if err != nil {
+			logger.V(1).Info("could not determine pipeline name, proceeding with reconciliation", "error", err)
+		} else if controllerutils.ShouldSkipDueToUpstream(
 			ctx, r.Client, pipelineName, vectorEmbeddingsGeneratorCR.Spec.DependsOn,
 			vectorEmbeddingsGeneratorCR.Namespace, vectorEmbeddingsGeneratorCR.Status.ObservedUpstreamState,
 		) {

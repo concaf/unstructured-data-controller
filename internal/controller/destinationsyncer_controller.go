@@ -83,8 +83,10 @@ func (r *DestinationSyncerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		destinationSyncCR.Status.Conditions,
 		operatorv1alpha1.DestinationSyncerCondition,
 	) {
-		pipelineName, pipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(destinationSyncCR)
-		if pipelineErr == nil && controllerutils.ShouldSkipDueToUpstream(
+		pipelineName, err := controllerutils.ParentPipelineNameFromOwnerReference(destinationSyncCR)
+		if err != nil {
+			logger.V(1).Info("could not determine pipeline name, proceeding with reconciliation", "error", err)
+		} else if controllerutils.ShouldSkipDueToUpstream(
 			ctx, r.Client, pipelineName, destinationSyncCR.Spec.DependsOn,
 			destinationSyncCR.Namespace, destinationSyncCR.Status.ObservedUpstreamState,
 		) {
