@@ -16,52 +16,40 @@ Best practices from controller-runtime, cluster-api, and cert-manager take prece
 1. `log.FromContext(ctx)` - never create standalone loggers
 2. Check `IsConfigCRHealthy()` - requeue if not ready
 3. `Get` the CR - return nil on NotFound (resource deleted, not an error)
-4. Check `IsAlreadyReconciled()` - skip expensive work on restart (see Restart Behavior below)
-5. Reconcile logic in focused helper methods
-6. On error: update CR status with the error, return the error. Do NOT log the error AND return it - that double-logs.
+4. Reconcile logic in focused helper methods
+5. On error: update CR status with the error, return the error. Do NOT log the error AND return it - that double-logs.
+
+## Do NOT skip reconciliation based on generation or status checks
+
+Never add logic inside `Reconcile()` to skip work based on `observedGeneration`, `LastAppliedGeneration`, or condition status. This is an anti-pattern for this project because:
+
+1. **It defeats predicates.** Controllers use watches and predicates (e.g., `FilesProcessedChangedPredicate`, Secret watches) to trigger reconciliation for specific events. A generation check inside `Reconcile()` can't distinguish why the reconcile was triggered - it blindly skips based on the CR's own state, silently dropping legitimate events from upstream stages, Secrets, or other watches.
+
+2. **It breaks polling loops.** Controllers that use `RequeueAfter` for periodic polling (e.g., SourceCrawler polling S3 for new files) get stuck because the generation doesn't change between polls. After the first successful reconcile, every subsequent timer-fired reconcile matches the check and skips.
+
+3. **It's fragile.** Every new watch or trigger added in the future silently breaks unless someone remembers to also update the skip check. We hit this repeatedly: it blocked RequeueAfter, then upstream events, then Secret changes.
+
+The idiomatic controller-runtime approach is:
+- **Make Reconcile idempotent** - always read current state, always converge to desired state
+- **Use predicates in SetupWithManager** to control which events trigger reconciliation (this is the right layer for filtering)
+- **Use concurrency** (5 workers per controller) to handle restart backlog quickly
+- **Rely on the priority queue** to prioritize new CRs (priority 0) over restart re-list items (priority -100)
+
+This is what the Kubebuilder documentation recommends, and what controller-runtime is designed for. `GenerationChangedPredicate` on the `For()` resource is the correct and sufficient restart optimization - it filters status-only Update events without blocking Create events or RequeueAfter items.
 
 ## Restart Behavior
 
-When a pod restarts or a new version is deployed, the informer does a full List of every CR and fires Create events for all of them. Any pending `RequeueAfter` items in the work queue are lost. Understanding this is critical for writing correct controllers.
-
-### What happens on restart
-1. The work queue is empty (all RequeueAfter timers are gone)
+When a pod restarts or a new version is deployed:
+1. The work queue is empty (all RequeueAfter timers are lost)
 2. The informer re-lists every existing CR as a Create event
 3. controller-runtime's priority queue assigns priority -100 to these initial-list items
 4. Any new CR created by a user after startup gets priority 0 (processed first)
-5. With concurrency > 1, multiple workers process the backlog in parallel
+5. With concurrency=5, multiple workers process the backlog in parallel
+6. `GenerationChangedPredicate` on `For()` only filters Update events - it lets all Create events through, which is correct
 
-### The IsAlreadyReconciled pattern
-Check `controllerutils.IsAlreadyReconciled()` inside `Reconcile()` after fetching the CR. If the spec hasn't changed (`LastAppliedGeneration == Generation` and condition is healthy), skip expensive work but still return `RequeueAfter` to restart polling loops:
+Do NOT manually set `result.Priority` to lower the priority of requeued items. controller-runtime preserves the original dequeue priority on requeue, so restart items at -100 naturally stay behind new CRs at 0.
 
-```go
-if controllerutils.IsAlreadyReconciled(cr.Generation, cr.Status.LastAppliedGeneration, cr.Status.Conditions, ConditionType) {
-    logger.V(1).Info("spec unchanged, restarting poll timer")
-    return ctrl.Result{RequeueAfter: resyncInterval}, nil
-}
-```
-
-For controllers that don't poll (e.g., UnstructuredDataPipeline), return `ctrl.Result{}` instead.
-
-This is the pattern used by Crossplane and cert-manager: let all CRs reconcile on restart, but make the reconcile cheap. It avoids thundering herd on external services while keeping the polling loop alive.
-
-### Do NOT use predicates for restart optimization
-Never use a predicate to filter out Create events based on reconciliation state. Predicates block the Create event entirely, which means:
-- The CR never enters the work queue
-- No `RequeueAfter` is ever returned
-- The periodic polling loop (S3 crawling, task status checking) never restarts
-- The controller is effectively dead for that CR until its spec changes
-
-`GenerationChangedPredicate` is safe because it only filters Update events (its `Create()` returns true). Custom predicates that filter Create events based on status fields are not safe.
-
-### Priority queue behavior
-controller-runtime's priority queue automatically handles restart prioritization. Do NOT manually set `result.Priority` to lower the priority of requeued items - it's unnecessary because:
-- Restart re-list items are dequeued at priority -100 (set by the framework)
-- When a reconcile returns `RequeueAfter` without setting `result.Priority`, controller-runtime **preserves the original dequeue priority**
-- So restart items stay at -100 on requeue, and new CRs at priority 0 always jump ahead
-- Setting an explicit lower priority (e.g., -200) adds no value since -100 is already below 0
-
-### Concurrency
+## Concurrency
 Per-controller concurrency is configured via environment variables (e.g., `CONCURRENCY_DOCUMENT_PROCESSOR=10`) with a default of 5 workers. This is set at startup via `config.Controller.GroupKindConcurrency` in the manager options. The work queue guarantees the same CR is never reconciled by two workers simultaneously, so increasing concurrency is safe for idempotent reconcilers.
 
 ## Error Handling
