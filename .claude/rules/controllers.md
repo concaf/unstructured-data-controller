@@ -47,7 +47,24 @@ When a pod restarts or a new version is deployed:
 5. With concurrency=5, multiple workers process the backlog in parallel
 6. `GenerationChangedPredicate` on `For()` only filters Update events - it lets all Create events through, which is correct
 
-Do NOT manually set `result.Priority` to lower the priority of requeued items. controller-runtime preserves the original dequeue priority on requeue, so restart items at -100 naturally stay behind new CRs at 0.
+## Priority Queue
+
+controller-runtime v0.23.3 uses a priority queue by default. Understanding how priorities work prevents unnecessary workarounds:
+
+**How priorities are assigned:**
+- Initial list items (pod restart re-list): priority -100 (set by the framework via `handler.LowPriority`)
+- Resync events (same ResourceVersion): priority -100
+- Real Create events (new CR from user): priority 0 (default, nil priority)
+- Real Update events (spec changed): priority 0 (default)
+
+**How priorities are preserved:**
+- When `Reconcile()` returns `RequeueAfter` or an error WITHOUT setting `result.Priority`, controller-runtime preserves the original dequeue priority. A restart item dequeued at -100 stays at -100 on requeue.
+- When `Reconcile()` sets `result.Priority = &value`, that overrides the priority for the requeue.
+- This means new CRs (priority 0) always jump ahead of restart backlog (priority -100) without any manual priority setting.
+
+**When to set `result.Priority`:**
+- For top-level orchestrating controllers that don't watch other stages or Secrets, setting a low priority on skip requeues can be useful (e.g., data-platform-operator's `ShouldSkipReconciliation` uses -200). This works because those controllers are only triggered by their own spec changes, so the skip check doesn't defeat any predicates.
+- For stage controllers in this project, do NOT set priority manually. The skip logic itself is wrong for our use case (see "Do NOT skip reconciliation" above), so the priority is irrelevant.
 
 ## Concurrency
 Per-controller concurrency is configured via environment variables (e.g., `CONCURRENCY_DOCUMENT_PROCESSOR=10`) with a default of 5 workers. This is set at startup via `config.Controller.GroupKindConcurrency` in the manager options. The work queue guarantees the same CR is never reconciled by two workers simultaneously, so increasing concurrency is safe for idempotent reconcilers.
