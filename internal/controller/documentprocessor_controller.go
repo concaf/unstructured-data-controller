@@ -83,28 +83,6 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
-	// On pod restart, skip expensive work (docling calls, S3 file checks) if
-	// the spec hasn't changed AND the upstream stage hasn't produced new files.
-	// Checking upstream filesProcessed ensures we don't miss work that arrived
-	// while the controller was down (watch events are lost on restart).
-	if controllerutils.IsAlreadyReconciled(
-		documentProcessorCR.Generation,
-		documentProcessorCR.Status.LastAppliedGeneration,
-		documentProcessorCR.Status.Conditions,
-		operatorv1alpha1.DocumentProcessorCondition,
-	) {
-		pipelineName, err := controllerutils.ParentPipelineNameFromOwnerReference(documentProcessorCR)
-		if err != nil {
-			logger.V(1).Info("could not determine pipeline name, proceeding with reconciliation", "error", err)
-		} else if controllerutils.ShouldSkipDueToUpstream(
-			ctx, r.Client, pipelineName, documentProcessorCR.Spec.DependsOn,
-			documentProcessorCR.Namespace, documentProcessorCR.Status.ObservedUpstreamState,
-		) {
-			logger.V(1).Info("spec unchanged and no new upstream files, skipping reconciliation")
-			return ctrl.Result{}, nil
-		}
-	}
-
 	documentProcessorCR = documentProcessorCR.DeepCopy()
 
 	applyVLMDefaults(documentProcessorCR)
@@ -210,28 +188,9 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	logger.Info("all jobs are completed, no need to requeue")
 
-	// Fetch upstream filesProcessed for all dependencies. Must be set inside
-	// the StatusPatch mutate callback so the merge patch includes it.
-	var observedState []operatorv1alpha1.ObservedUpstreamState
-	if len(documentProcessorCR.Spec.DependsOn) > 0 {
-		upstreamPipeline, upstreamPipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(documentProcessorCR)
-		if upstreamPipelineErr == nil {
-			for _, dep := range documentProcessorCR.Spec.DependsOn {
-				upstreamName := controllerutils.StageCRName(upstreamPipeline, dep.Name)
-				if upstreamFiles, upstreamErr := controllerutils.UpstreamFilesProcessed(ctx, r.Client, upstreamName, documentProcessorCR.Namespace); upstreamErr == nil {
-					observedState = append(observedState, operatorv1alpha1.ObservedUpstreamState{
-						Name:           dep.Name,
-						FilesProcessed: upstreamFiles,
-					})
-				}
-			}
-		}
-	}
-
 	successMessage := fmt.Sprintf("successfully reconciled document processor: %s", documentProcessorCR.Name)
 	if err := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
 		documentProcessorCR.UpdateStatus(successMessage, nil)
-		documentProcessorCR.Status.ObservedUpstreamState = observedState
 	}); err != nil {
 		logger.Error(err, "failed to update DocumentProcessor CR status", "namespace", documentProcessorCR.Namespace, "name", documentProcessorCR.Name)
 		return r.handleError(ctx, documentProcessorCR, err)

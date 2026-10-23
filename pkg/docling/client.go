@@ -25,7 +25,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/redhat-data-and-ai/unstructured-data-controller/pkg/httpclient"
@@ -50,6 +49,17 @@ const (
 // This happens when docling restarts or evicts old tasks. The controller
 // should clear the stale task ID and re-submit the job.
 var ErrTaskNotFound = errors.New("docling task not found")
+
+// DoclingHTTPError is returned when docling returns a non-200 status code.
+// Use errors.As to extract the status code for specific handling (e.g., 404).
+type DoclingHTTPError struct {
+	StatusCode int
+	Endpoint   string
+}
+
+func (e *DoclingHTTPError) Error() string {
+	return fmt.Sprintf("docling request to %s returned status %d", e.Endpoint, e.StatusCode)
+}
 
 type TaskStatus string
 
@@ -248,7 +258,7 @@ func (c *Client) doDoclingRequest(ctx context.Context, method, endpoint string, 
 		if closeErr := resp.Body.Close(); closeErr != nil {
 			logger.Error(closeErr, "failed to close response body for non-200 response")
 		}
-		return nil, fmt.Errorf("docling request to %s returned status %d", endpoint, resp.StatusCode)
+		return nil, &DoclingHTTPError{StatusCode: resp.StatusCode, Endpoint: endpoint}
 	}
 
 	return resp.Body, nil
@@ -349,7 +359,8 @@ func (c *Client) getTaskStatus(ctx context.Context, taskID string) (bool, *TaskS
 		// can remove the stale job and re-submit. This check is intentionally
 		// only in getTaskStatus, not in doDoclingRequest, because a 404 on
 		// the result endpoint has different semantics.
-		if strings.Contains(err.Error(), "status 404") {
+		var httpErr *DoclingHTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
 			return false, nil, ErrTaskNotFound
 		}
 		return false, nil, fmt.Errorf("failed to get response body: %w", err)

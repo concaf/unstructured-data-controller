@@ -85,11 +85,6 @@ func (r *SourceCrawlerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	// No IsAlreadyReconciled check here. SourceCrawler polls external state
-	// (S3, GDrive, Git) that has no K8s event - it must run every reconcile
-	// to detect new files. The generation check would block the polling loop
-	// since the spec doesn't change when new files appear externally.
-
 	if err := controllerutils.StatusPatch(ctx, r.Client, sourceCrawlerCR, func() {
 		sourceCrawlerCR.SetWaiting()
 	}); err != nil {

@@ -75,26 +75,6 @@ func (r *DestinationSyncerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
-	// On pod restart, skip expensive work (destination syncing) if the spec
-	// hasn't changed AND the upstream stage hasn't produced new files.
-	if controllerutils.IsAlreadyReconciled(
-		destinationSyncCR.Generation,
-		destinationSyncCR.Status.LastAppliedGeneration,
-		destinationSyncCR.Status.Conditions,
-		operatorv1alpha1.DestinationSyncerCondition,
-	) {
-		pipelineName, err := controllerutils.ParentPipelineNameFromOwnerReference(destinationSyncCR)
-		if err != nil {
-			logger.V(1).Info("could not determine pipeline name, proceeding with reconciliation", "error", err)
-		} else if controllerutils.ShouldSkipDueToUpstream(
-			ctx, r.Client, pipelineName, destinationSyncCR.Spec.DependsOn,
-			destinationSyncCR.Namespace, destinationSyncCR.Status.ObservedUpstreamState,
-		) {
-			logger.V(1).Info("spec unchanged and no new upstream files, skipping reconciliation")
-			return ctrl.Result{}, nil
-		}
-	}
-
 	if err := controllerutils.StatusPatch(ctx, r.Client, destinationSyncCR, func() {
 		destinationSyncCR.SetWaiting()
 	}); err != nil {
@@ -153,27 +133,10 @@ func (r *DestinationSyncerReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		logger.Info("successfully ingested files to destination", "stage", dep.Name)
 	}
 
-	var observedState []operatorv1alpha1.ObservedUpstreamState
-	if len(destinationSyncCR.Spec.DependsOn) > 0 {
-		upstreamPipeline, upstreamPipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(destinationSyncCR)
-		if upstreamPipelineErr == nil {
-			for _, dep := range destinationSyncCR.Spec.DependsOn {
-				upstreamName := controllerutils.StageCRName(upstreamPipeline, dep.Name)
-				if upstreamFiles, upstreamErr := controllerutils.UpstreamFilesProcessed(ctx, r.Client, upstreamName, destinationSyncCR.Namespace); upstreamErr == nil {
-					observedState = append(observedState, operatorv1alpha1.ObservedUpstreamState{
-						Name:           dep.Name,
-						FilesProcessed: upstreamFiles,
-					})
-				}
-			}
-		}
-	}
-
 	successMessage := fmt.Sprintf("successfully reconciled destination sync: %s", destinationSyncCR.Name)
 	if err := controllerutils.StatusPatch(ctx, r.Client, destinationSyncCR, func() {
 		destinationSyncCR.Status.FilesProcessed += totalFilesSynced
 		destinationSyncCR.UpdateStatus(successMessage, nil)
-		destinationSyncCR.Status.ObservedUpstreamState = observedState
 	}); err != nil {
 		logger.Error(err, "failed to update DestinationSyncer CR status")
 		return r.handleError(ctx, destinationSyncCR, err)

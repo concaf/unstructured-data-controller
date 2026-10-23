@@ -79,26 +79,6 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 		return ctrl.Result{}, err
 	}
 
-	// On pod restart, skip expensive work (embedding API calls, S3 file checks)
-	// if the spec hasn't changed AND the upstream stage hasn't produced new files.
-	if controllerutils.IsAlreadyReconciled(
-		vectorEmbeddingsGeneratorCR.Generation,
-		vectorEmbeddingsGeneratorCR.Status.LastAppliedGeneration,
-		vectorEmbeddingsGeneratorCR.Status.Conditions,
-		operatorv1alpha1.VectorEmbeddingGenerationConditionType,
-	) {
-		pipelineName, err := controllerutils.ParentPipelineNameFromOwnerReference(vectorEmbeddingsGeneratorCR)
-		if err != nil {
-			logger.V(1).Info("could not determine pipeline name, proceeding with reconciliation", "error", err)
-		} else if controllerutils.ShouldSkipDueToUpstream(
-			ctx, r.Client, pipelineName, vectorEmbeddingsGeneratorCR.Spec.DependsOn,
-			vectorEmbeddingsGeneratorCR.Namespace, vectorEmbeddingsGeneratorCR.Status.ObservedUpstreamState,
-		) {
-			logger.V(1).Info("spec unchanged and no new upstream files, skipping reconciliation")
-			return ctrl.Result{}, nil
-		}
-	}
-
 	vectorEmbeddingsGeneratorCR = vectorEmbeddingsGeneratorCR.DeepCopy()
 	vectorEmbeddingsGeneratorCR.Spec.VectorEmbeddingsGeneratorConfig.SetDefaults()
 
@@ -153,28 +133,11 @@ func (r *VectorEmbeddingsGeneratorReconciler) Reconcile(ctx context.Context, req
 		return r.handleError(ctx, vectorEmbeddingsGeneratorCR, errors.New("failed to process some chunked files"))
 	}
 
-	var observedState []operatorv1alpha1.ObservedUpstreamState
-	if len(vectorEmbeddingsGeneratorCR.Spec.DependsOn) > 0 {
-		upstreamPipeline, upstreamPipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(vectorEmbeddingsGeneratorCR)
-		if upstreamPipelineErr == nil {
-			for _, dep := range vectorEmbeddingsGeneratorCR.Spec.DependsOn {
-				upstreamName := controllerutils.StageCRName(upstreamPipeline, dep.Name)
-				if upstreamFiles, upstreamErr := controllerutils.UpstreamFilesProcessed(ctx, r.Client, upstreamName, vectorEmbeddingsGeneratorCR.Namespace); upstreamErr == nil {
-					observedState = append(observedState, operatorv1alpha1.ObservedUpstreamState{
-						Name:           dep.Name,
-						FilesProcessed: upstreamFiles,
-					})
-				}
-			}
-		}
-	}
-
 	// all done, let's update the status to ready
 	successMessage := fmt.Sprintf("successfully reconciled vector embeddings generator: %s", vectorEmbeddingsGeneratorCR.Name)
 	if err := controllerutils.StatusPatch(ctx, r.Client, vectorEmbeddingsGeneratorCR, func() {
 		vectorEmbeddingsGeneratorCR.Status.FilesProcessed += filesProcessed
 		vectorEmbeddingsGeneratorCR.UpdateStatus(successMessage, nil)
-		vectorEmbeddingsGeneratorCR.Status.ObservedUpstreamState = observedState
 	}); err != nil {
 		logger.Error(err, "failed to update VectorEmbeddingsGenerator CR status", "namespace", vectorEmbeddingsGeneratorCR.Namespace, "name", vectorEmbeddingsGeneratorCR.Name)
 		return r.handleError(ctx, vectorEmbeddingsGeneratorCR, err)

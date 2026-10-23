@@ -88,26 +88,6 @@ func (r *ChunksGeneratorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
-	// On pod restart, skip expensive work (langchain calls, S3 file checks) if
-	// the spec hasn't changed AND the upstream stage hasn't produced new files.
-	if controllerutils.IsAlreadyReconciled(
-		chunksGeneratorCR.Generation,
-		chunksGeneratorCR.Status.LastAppliedGeneration,
-		chunksGeneratorCR.Status.Conditions,
-		operatorv1alpha1.ChunksGeneratorCondition,
-	) {
-		pipelineName, err := controllerutils.ParentPipelineNameFromOwnerReference(chunksGeneratorCR)
-		if err != nil {
-			logger.V(1).Info("could not determine pipeline name, proceeding with reconciliation", "error", err)
-		} else if controllerutils.ShouldSkipDueToUpstream(
-			ctx, r.Client, pipelineName, chunksGeneratorCR.Spec.DependsOn,
-			chunksGeneratorCR.Namespace, chunksGeneratorCR.Status.ObservedUpstreamState,
-		) {
-			logger.V(1).Info("spec unchanged and no new upstream files, skipping reconciliation")
-			return ctrl.Result{}, nil
-		}
-	}
-
 	chunksGeneratorCR = chunksGeneratorCR.DeepCopy()
 	chunksGeneratorCR.Spec.ChunksGeneratorConfig.SetDefaults()
 
@@ -176,28 +156,10 @@ func (r *ChunksGeneratorReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}, nil
 	}
 
-	// Fetch upstream filesProcessed for all dependencies.
-	var observedState []operatorv1alpha1.ObservedUpstreamState
-	if len(chunksGeneratorCR.Spec.DependsOn) > 0 {
-		upstreamPipeline, upstreamPipelineErr := controllerutils.ParentPipelineNameFromOwnerReference(chunksGeneratorCR)
-		if upstreamPipelineErr == nil {
-			for _, dep := range chunksGeneratorCR.Spec.DependsOn {
-				upstreamName := controllerutils.StageCRName(upstreamPipeline, dep.Name)
-				if upstreamFiles, upstreamErr := controllerutils.UpstreamFilesProcessed(ctx, r.Client, upstreamName, chunksGeneratorCR.Namespace); upstreamErr == nil {
-					observedState = append(observedState, operatorv1alpha1.ObservedUpstreamState{
-						Name:           dep.Name,
-						FilesProcessed: upstreamFiles,
-					})
-				}
-			}
-		}
-	}
-
 	successMessage := fmt.Sprintf("successfully reconciled chunks generator: %s", chunksGeneratorCR.Name)
 	if err := controllerutils.StatusPatch(ctx, r.Client, chunksGeneratorCR, func() {
 		chunksGeneratorCR.Status.FilesProcessed += filesProcessed
 		chunksGeneratorCR.UpdateStatus(successMessage, nil)
-		chunksGeneratorCR.Status.ObservedUpstreamState = observedState
 	}); err != nil {
 		logger.Error(err, "failed to update ChunksGenerator CR status", "namespace", chunksGeneratorCR.Namespace, "name", chunksGeneratorCR.Name)
 		return r.handleError(ctx, chunksGeneratorCR, err)

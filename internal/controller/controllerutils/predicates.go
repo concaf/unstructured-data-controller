@@ -17,15 +17,7 @@ limitations under the License.
 package controllerutils
 
 import (
-	"context"
-	"fmt"
-
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
-
-	operatorv1alpha1 "github.com/redhat-data-and-ai/unstructured-data-controller/api/v1alpha1"
 )
 
 // FilesProcessedGetter is implemented by all stage CRs to expose the filesProcessed counter.
@@ -49,93 +41,8 @@ func (FilesProcessedChangedPredicate) Update(e event.UpdateEvent) bool {
 	return oldObj.GetFilesProcessed() != newObj.GetFilesProcessed()
 }
 
-// IsAlreadyReconciled returns true when the CR's spec has already been
-// successfully reconciled (generation matches and condition is healthy).
-// Use inside Reconcile() to skip expensive work on pod restart while still
-// returning RequeueAfter to restart polling loops. Do NOT use in predicates
-// because predicates block the Create event entirely, preventing RequeueAfter
-// from being re-established after a restart.
-
 // StageCRName returns the Kubernetes resource name for a stage CR within a pipeline.
 // All stage CRs follow the convention: pipelineName-stageName.
 func StageCRName(pipelineName, stageName string) string {
 	return pipelineName + "-" + stageName
-}
-
-// IsAlreadyReconciled returns true when the CR's spec has already been
-// successfully reconciled (generation matches and condition is healthy).
-func IsAlreadyReconciled(generation, lastAppliedGeneration int64, conditions []metav1.Condition, conditionType string) bool {
-	if lastAppliedGeneration != generation {
-		return false
-	}
-	condition := meta.FindStatusCondition(conditions, conditionType)
-	return condition != nil && condition.Status == metav1.ConditionTrue
-}
-
-// HasUpstreamChanged returns true if any upstream dependency produced new files
-// since this controller last reconciled. Think of a pod restart as going home
-// for the night: when you come back in the morning, you look at the current
-// state of your desk (upstream filesProcessed) rather than relying on messages
-// (watch events) that were sent while you were away.
-func HasUpstreamChanged(currentCounts map[string]int64, observed []operatorv1alpha1.ObservedUpstreamState) bool {
-	if len(currentCounts) != len(observed) {
-		return true
-	}
-	observedMap := make(map[string]int64, len(observed))
-	for _, o := range observed {
-		observedMap[o.Name] = o.FilesProcessed
-	}
-	for name, current := range currentCounts {
-		if current != observedMap[name] {
-			return true
-		}
-	}
-	return false
-}
-
-// UpstreamFilesProcessed fetches the filesProcessed count from an upstream
-// stage CR by trying each stage type. Only called in the IsAlreadyReconciled
-// path (restart/no-op), so the cost of up to 5 Gets is acceptable compared to
-// the hundreds of S3 calls a full reconcile would make.
-func UpstreamFilesProcessed(ctx context.Context, c client.Client, name, namespace string) (int64, error) {
-	key := client.ObjectKey{Name: name, Namespace: namespace}
-	stages := []FilesProcessedGetter{
-		&operatorv1alpha1.SourceCrawler{},
-		&operatorv1alpha1.DocumentProcessor{},
-		&operatorv1alpha1.ChunksGenerator{},
-		&operatorv1alpha1.VectorEmbeddingsGenerator{},
-		&operatorv1alpha1.DestinationSyncer{},
-	}
-	for _, stage := range stages {
-		obj, ok := stage.(client.Object)
-		if !ok {
-			continue
-		}
-		if err := c.Get(ctx, key, obj); err != nil {
-			continue
-		}
-		return stage.GetFilesProcessed(), nil
-	}
-	return 0, fmt.Errorf("no upstream stage found: %s/%s", namespace, name)
-}
-
-// ShouldSkipDueToUpstream checks all upstream dependencies and returns true if
-// none of them have changed since the last reconcile. Returns false (don't skip)
-// if any upstream can't be read or has new files.
-func ShouldSkipDueToUpstream(
-	ctx context.Context, c client.Client, pipelineName string,
-	dependsOn []operatorv1alpha1.StageDependency, namespace string,
-	observed []operatorv1alpha1.ObservedUpstreamState,
-) bool {
-	currentCounts := map[string]int64{}
-	for _, dep := range dependsOn {
-		upstreamName := StageCRName(pipelineName, dep.Name)
-		upstreamFiles, err := UpstreamFilesProcessed(ctx, c, upstreamName, namespace)
-		if err != nil {
-			// Can't determine upstream state, reconcile to be safe
-			return false
-		}
-		currentCounts[dep.Name] = upstreamFiles
-	}
-	return !HasUpstreamChanged(currentCounts, observed)
 }

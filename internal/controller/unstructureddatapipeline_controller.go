@@ -87,18 +87,6 @@ func (r *UnstructuredDataPipelineReconciler) Reconcile(ctx context.Context, req 
 		return ctrl.Result{}, err
 	}
 
-	// On pod restart, skip reconciliation if the spec hasn't changed.
-	// Pipeline doesn't use RequeueAfter for polling, so no timer to restart.
-	if controllerutils.IsAlreadyReconciled(
-		unstructuredDataPipelineCR.Generation,
-		unstructuredDataPipelineCR.Status.LastAppliedGeneration,
-		unstructuredDataPipelineCR.Status.Conditions,
-		operatorv1alpha1.UnstructuredDataPipelineCondition,
-	) {
-		logger.V(1).Info("spec unchanged, skipping reconciliation")
-		return ctrl.Result{}, nil
-	}
-
 	// DeepCopy to avoid mutating the shared informer cache
 	unstructuredDataPipelineCR = unstructuredDataPipelineCR.DeepCopy()
 

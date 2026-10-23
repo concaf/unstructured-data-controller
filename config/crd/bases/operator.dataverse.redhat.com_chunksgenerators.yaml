@@ -184,26 +184,6 @@ spec:
               lastAppliedGeneration:
                 format: int64
                 type: integer
-              observedUpstreamState:
-                items:
-                  description: |-
-                    ObservedUpstreamState records an upstream dependency's filesProcessed count
-                    at the time of last successful reconcile. Used on restart to detect new work
-                    without relying on watch events.
-                  properties:
-                    filesProcessed:
-                      description: FilesProcessed is the upstream's filesProcessed
-                        count when last observed.
-                      format: int64
-                      type: integer
-                    name:
-                      description: Name is the dependency name from DependsOn.
-                      type: string
-                  required:
-                  - filesProcessed
-                  - name
-                  type: object
-                type: array
             type: object
         type: object
     served: true
