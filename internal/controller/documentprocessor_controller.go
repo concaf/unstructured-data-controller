@@ -515,7 +515,12 @@ func (r *DocumentProcessorReconciler) needsConversion(ctx context.Context, rawFi
 			// but if the job is failed, we will send it for conversion again and increment the attempt count
 			switch job.Status {
 			case string(docling.TaskStatusFailure), string(docling.TaskStatusSkipped):
+				// Return with the job left in the status. processDocument reads
+				// it to carry Attempts forward, so deleting it here would reset
+				// the count to 1 on every re-submission and
+				// maxDoclingConversionAttempts would never be reached.
 				logger.Info("job is failed or skipped, will be sent for conversion again ...", "filePath", rawFilePath)
+				return true, nil
 			case string(docling.TaskStatusPending), string(docling.TaskStatusStarted), string(docling.TaskStatusPartialSuccess), string(docling.TaskStatusSuccess):
 				logger.Info("job is running or completed, no need to create a new job", "filePath", rawFilePath)
 				return false, nil
@@ -524,8 +529,10 @@ func (r *DocumentProcessorReconciler) needsConversion(ctx context.Context, rawFi
 			}
 		}
 
-		// if the current job is not valid (different configuration), then it is of no use to us irrespective of the status
-		// we will delete the job from status and create a new job with the new configuration
+		// The configuration changed, so the existing job is useless whatever its
+		// status. Delete it and start fresh. Dropping the attempt count is
+		// deliberate here: this is a different conversion, so it gets a full
+		// retry budget of its own.
 		logger.Info("job already exists, but with a different configuration, let's delete the current job from status", "filePath", rawFilePath)
 		if err := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
 			documentProcessorCR.DeleteJobByFilePath(rawFilePath)
