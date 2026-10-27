@@ -38,7 +38,18 @@ observedUpstreamState:
   crawl: 15
 ```
 
-The only exceptions are pure maps (labels, selectors, annotations, data), not sets of subobjects. This maintains the invariant that all JSON/YAML keys are fields in API objects, and is required for proper OpenAPI validation and server-side apply merge behavior.
+The only exceptions are pure maps (labels, selectors, annotations, data), not sets of subobjects. This maintains the invariant that all JSON/YAML keys are fields in API objects, and is required for proper OpenAPI validation.
+
+Naming the elements is not enough on its own - a named-subobject list must also declare its merge key, or server-side apply treats the whole list as atomic and one applier replaces every entry instead of merging its own:
+
+```go
+// +listType=map
+// +listMapKey=name
+// +optional
+ObservedUpstreamState []ObservedUpstreamState `json:"observedUpstreamState,omitempty"`
+```
+
+Use `+listType=atomic` instead only when the list really is a single indivisible value, and say why in a comment. Conditions use the same markers keyed on `type` (see below).
 
 ### Conditions
 - Use `[]metav1.Condition` with `+listType=map` and `+listMapKey=type`
@@ -48,6 +59,12 @@ The only exceptions are pure maps (labels, selectors, annotations, data), not se
 - The pattern of using `phase` is deprecated - use conditions instead
 - Conditions are observations, not state machines
 
-### observedGeneration
-- Use `observedGeneration` to report the generation most recently acted upon
-- Lets clients determine if the controller has seen the latest spec
+### Recording the observed generation
+Upstream calls this field `observedGeneration`. This project spells it
+`lastAppliedGeneration` (`json:"lastAppliedGeneration,omitempty"`) and every
+existing CRD already uses that name, so new CRDs must use it too - a second
+spelling would mean clients had to check both.
+
+- Record the generation most recently acted upon, so clients can tell whether the controller has seen the latest spec
+- Do not rename the existing field: it is part of the published CRD schema and renaming it is a breaking API change for anything reading status
+- Do not add an `observedGeneration` alongside it

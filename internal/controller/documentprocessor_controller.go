@@ -200,34 +200,59 @@ func (r *DocumentProcessorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	return ctrl.Result{}, nil
 }
 
-// reconcileInFlightJobs checks on in-flight docling jobs. If docling lost a
-// task (404), it removes the stale job and persists the change so the
-// processDocument loop can re-submit it.
+// reconcileInFlightJobs polls docling for every in-flight job. reconcileJob
+// removes the jobs it settles (converted, or failed past the retry budget)
+// from the status itself, so the only ones left for this function to handle
+// are the tasks docling no longer knows about.
 func (r *DocumentProcessorReconciler) reconcileInFlightJobs(ctx context.Context, documentProcessorCR *operatorv1alpha1.DocumentProcessor, inputPath, outputPath string, fs *filestore.FileStore) ([]error, error) {
 	logger := log.FromContext(ctx)
 	var jobProcessingErrors []error
-	var activeJobs []operatorv1alpha1.Job
+	var lostJobs []operatorv1alpha1.Job
 	for _, job := range documentProcessorCR.Status.Jobs {
 		logger.Info("reconciling job", "job", job)
 		if err := r.reconcileJob(ctx, job, documentProcessorCR, inputPath, outputPath, fs); err != nil {
+			// Docling restarted or expired the task. Collect it and fix up the
+			// status after the loop. Do not rebuild Status.Jobs from this loop:
+			// reconcileJob has already deleted the jobs it settled, so writing a
+			// list built here back to the status would resurrect them and the
+			// file would be converted (and counted) a second time.
 			if errors.Is(err, docling.ErrTaskNotFound) {
-				logger.Info("docling lost track of task, removing stale job so it can be re-submitted",
-					"taskID", job.TaskID, "filePath", job.FilePath)
+				lostJobs = append(lostJobs, job)
 				continue
 			}
 			jobProcessingErrors = append(jobProcessingErrors, err)
 			logger.Error(err, "failed to process job", "job", job.FilePath)
 		}
-		activeJobs = append(activeJobs, job)
 	}
-	// Persist the updated job list immediately so stale jobs don't reappear
-	// if the reconcile exits via requeue or error before the final StatusPatch.
-	if len(documentProcessorCR.Status.Jobs) != len(activeJobs) {
-		if err := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
-			documentProcessorCR.Status.Jobs = activeJobs
-		}); err != nil {
-			return nil, fmt.Errorf("persisting stale job removal: %w", err)
+
+	if len(lostJobs) == 0 {
+		return jobProcessingErrors, nil
+	}
+
+	// Persist straight away so the lost tasks do not still look in-flight if
+	// this reconcile later exits via requeue or error.
+	if err := controllerutils.StatusPatch(ctx, r.Client, documentProcessorCR, func() {
+		for _, job := range lostJobs {
+			// Mark the job failed instead of deleting it. needsConversion treats
+			// a failed job as "re-submit", and processDocument reads the surviving
+			// job to carry the attempt count forward. Deleting would reset
+			// Attempts to 1 on every re-submission, so a docling instance that
+			// keeps losing tasks would never reach maxDoclingConversionAttempts
+			// and the same file would be re-submitted forever.
+			if job.Attempts < maxDoclingConversionAttempts {
+				logger.Info("docling lost track of task, marking job for re-submission",
+					"taskID", job.TaskID, "filePath", job.FilePath, "attempts", job.Attempts)
+				job.Status = string(docling.TaskStatusFailure)
+				documentProcessorCR.AddOrUpdateJob(job)
+				continue
+			}
+			logger.Info("docling lost track of task and the retry budget is spent, marking file permanently failing",
+				"taskID", job.TaskID, "filePath", job.FilePath, "attempts", job.Attempts)
+			documentProcessorCR.AddPermanentlyFailingFile(job.FilePath)
+			documentProcessorCR.DeleteJobByFilePath(job.FilePath)
 		}
+	}); err != nil {
+		return nil, fmt.Errorf("recording docling tasks lost by the server: %w", err)
 	}
 	return jobProcessingErrors, nil
 }
